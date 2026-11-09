@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# The interface: dependencies, and its build (npm run build writes it into the package)
+node_modules/
+/camlib_ui/web/
+/web/dist/
+*.tsbuildinfo
+
+# Projects and what builds and the viewer leave in them
+/camlib-projects/
+.builds/
+.cache/
+
+# Tools and editors
+.idea/
+.vscode/
+.DS_Store
+*.log
