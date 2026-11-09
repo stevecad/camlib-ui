@@ -64,17 +64,26 @@ cd web && npm ci && npm run build && cd ..
 ## Run
 
 ```sh
-camlib-ui --projects ~/camlib-projects --camlib-posts ../camlib/examples
+./start.sh
 ```
 
 Then open <http://127.0.0.1:8765>. An empty projects folder is given the `plate` example to start from.
 
+`start.sh` checks that camlib-ui and camlib are installed, builds the interface if it isn't built yet, finds camlib's
+posts in `../camlib/examples` (the checkout from Install), and starts the server. `./start.sh --help` lists it all:
+
 | Option | |
 |---|---|
-| `--projects DIR` | The projects folder (default `./camlib-projects`, or `$CAMLIB_UI_PROJECTS`). |
-| `--camlib-posts DIR` | camlib's controller posts: a camlib checkout's `examples/` folder (or `$CAMLIB_POSTS`). Without it only the LinuxCNC post, built into camlib, is available. |
-| `--host`, `--port` | Where to listen (default `127.0.0.1:8765`). |
-| `--timeout S` | A build's time limit (default 900 s). |
+| `-p`, `--projects DIR` | The projects folder (default `./camlib-projects`, or `$CAMLIB_UI_PROJECTS`). |
+| `--host ADDRESS`, `-P`, `--port PORT` | Where to listen (default `127.0.0.1:8765`: this machine only). |
+| `--lan` | Listen on this machine's LAN address, so other computers on your network can open it. |
+| `--posts DIR` | camlib's controller posts: a camlib checkout's `examples/` folder (default `$CAMLIB_POSTS`, else `../camlib/examples`). Without them only the LinuxCNC post, built into camlib, is available. |
+| `--timeout SECONDS` | A build's time limit (default 900). |
+| `--build` | Rebuild the interface first (after pulling changes). |
+| `--venv DIR` | The Python environment camlib-ui is installed in (default `./.venv`). |
+
+For example, `./start.sh --lan --projects ~/cam --port 9000`. The installed `camlib-ui` command takes the same
+`--projects`, `--host`, `--port`, `--timeout` and `--camlib-posts` options directly.
 
 camlib-ui runs your project's Python code on this machine: it listens on 127.0.0.1 only unless you say otherwise.
 Don't expose it to a network you don't trust.
