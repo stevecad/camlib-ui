@@ -67,7 +67,7 @@ export interface Build extends BuildSummary { metadata?: Metadata | null; progra
 
 export interface PartMesh {
   positions: number[]; indices: number[]; triangle_faces: number[];
-  /** A plane's outward `normal`; a cylinder's `axis`, a `center` on it and its `radius`. */
+  /** A plane's outward `normal` and its `center`; a cylinder's `axis`, a `center` on it and its `radius`. */
   faces: { name: string; names: string[]; type: string; area_mm2: number; normal?: number[]; axis?: number[]; center?: number[]; radius?: number }[];
   edges: number[][];
   /** Each edge's name and kind; `flat`: a line or circular arc lying in XY (what paths() follows). */

@@ -142,15 +142,17 @@ def load_part(path: Path, alias: str = "part") -> Part:
 
 
 def _face_geometry(face) -> dict:
-    """What picking a face needs: a plane's normal (outward), a cylinder's axis, a point on it and its radius."""
+    """What picking a face needs: a plane's normal (outward) and centre, a cylinder's axis, a point on it and its
+    radius."""
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.GeomAbs import GeomAbs_Cylinder, GeomAbs_Plane
     surface = BRepAdaptor_Surface(face.wrapped)
     kind = surface.GetType()
     r = lambda v: round(v, 6)
     if kind == GeomAbs_Plane:
-        normal = face.normalAt()
-        return {"normal": [r(normal.x), r(normal.y), r(normal.z)]}
+        normal, center = face.normalAt(), face.Center()
+        # Its centre too: a flat face's height is what an operation picked on it cuts down to.
+        return {"normal": [r(normal.x), r(normal.y), r(normal.z)], "center": [r(center.x), r(center.y), r(center.z)]}
     if kind == GeomAbs_Cylinder:
         cylinder = surface.Cylinder()
         axis, at = cylinder.Axis().Direction(), cylinder.Axis().Location()

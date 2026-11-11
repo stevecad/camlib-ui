@@ -49,7 +49,7 @@ class Code(BaseModel):
 
 
 # The tessellation's format (bumped when it changes, so cached parts are read again).
-PART_FORMAT = 2
+PART_FORMAT = 3
 
 
 def create_app(root: Path, *, timeout: int = 900) -> FastAPI:

@@ -11,7 +11,7 @@ import { OpIcon, SetupIcon } from '../icons';
 import { availableSpecs, fieldsOf, NESTED, OP_BY_CLASS, type FieldInfo, type Section as SectionKey } from '../cam/opSpecs';
 import { emptyNested, type Nested, type OpDraft, type SetupDraft } from '../cam/forms';
 import {
-  closeForm, commitForm, dialectOf, machinesOf, okProblem, openNewOp, presetsOf, showInCode, startPicking, toolSetupsOf, toolsOf, updateOp, updateSetup, useEditor,
+  closeForm, commitForm, dialectOf, machinesOf, okProblem, openNewOp, presetsOf, setOpTool, showInCode, startPicking, toolSetupsOf, toolsOf, updateOp, updateSetup, useEditor,
   useShopRecords,
 } from '../cam/programEditor';
 import { displayShortcut } from '../commands';
@@ -156,7 +156,7 @@ function OpForm({ draft, tooling, workOffset }: { draft: OpDraft; tooling: strin
       <div className="form-head-fields">
         <Row label="Name *" field="id"><input id={fieldId('id')} aria-label="Name" value={draft.id} onChange={(event) => updateOp((d) => ({ ...d, id: event.target.value }))} /></Row>
         <Row label="Tool *" field="tool" sub={tool ? `T${tool.number ?? '?'} H${tool.register ?? '?'}${tool.diameter ? ` · Ø${tool.diameter} mm` : ''}${workOffset !== 1 ? ` · work offset ${workOffset}` : ''}` : undefined}>
-          <Select ariaLabel="Tool" id={fieldId('tool')} value={draft.tool ?? ''} onChange={(key) => updateOp((d) => ({ ...d, tool: key || null }))}
+          <Select ariaLabel="Tool" id={fieldId('tool')} value={draft.tool ?? ''} onChange={(key) => setOpTool(key || null)}
             options={[{ value: '', label: fits.length ? 'Choose a tool…' : 'No tool of this kind in the tool setup' },
               ...fits.map((item) => ({ value: item.key, label: `T${item.number ?? '?'} ${item.name}`, hint: item.diameter ? `Ø${item.diameter}` : undefined })),
               ...(draft.tool && !tool ? [{ value: draft.tool, label: `${draft.tool} (not in the tool setup)` }] : [])]} />

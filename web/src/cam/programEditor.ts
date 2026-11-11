@@ -7,7 +7,7 @@
 import { create } from 'zustand';
 import { api, type PartMesh } from '../api';
 import { findDefinition, revealIn, startBuild, toast, useApp } from '../state';
-import { fieldsLoaded, OP_BY_CLASS, setFields, type CamlibField, type CutterType, type GeometryKind } from './opSpecs';
+import { fieldsLoaded, OP_BY_CLASS, setFields, type CamlibField, type CutterType, type GeometryKind, fieldNames } from './opSpecs';
 import { freeOpId, readProgram, type CamOp, type CamProgramModel, type Outline } from './pyCode';
 import {
   deleteOp, duplicateOp, FormError, missingOf, newOp, newProgramCode, readOp, readSetup, reorderOps, setupContext, writeOp, writeSetup, type Geometry, type OpDraft, type SetupDraft,
@@ -181,8 +181,21 @@ export const toolSetupsOf = (): ShopChoice[] => ofKind('tool_setup').map((record
  */
 export interface Pending { setup: SetupDraft; code: string }
 
+/**
+ * Values a new operation's form fills in from what the program already says, so nobody types them again: per tool,
+ * the feeds, speed and coolant of the last operation that uses it; and the height the setup's material starts at (the
+ * floor of its last facing operation, else the stock's top). Every one is shown filled and can be changed. Nothing is
+ * invented: a tool the program hasn't used yet has no feeds here.
+ */
+export interface Known { byTool: Record<string, Record<string, string>>; top: string | null }
+const TOOL_VALUES = ['feed_mm_min', 'plunge_mm_min', 'spindle_rpm', 'coolant'];
+
 export type ProgramForm =
-  | { mode: 'op'; setup: string; editing: string | null; draft: OpDraft; tooling: string | null; workOffset: number; prefilled: string[]; pending: Pending | null; base: string }
+  | {
+      mode: 'op'; setup: string; editing: string | null; draft: OpDraft; tooling: string | null; workOffset: number; prefilled: string[]; pending: Pending | null; base: string;
+      /** What the program already says, for filling a new operation's fields (see `Known`). */
+      known: Known;
+    }
   | { mode: 'setup'; editing: string | null; draft: SetupDraft; newProgram: boolean; base: string }
   | { mode: 'first'; pending: Pending; base: string };
 
@@ -213,6 +226,50 @@ function targetSetup(model: CamProgramModel): string | null {
   return (setup && model.setups.some((item) => item.id === setup) ? setup : null) ?? model.setups.at(-1)?.id ?? null;
 }
 
+/** Fills an operation's empty feeds, speed and coolant (and the ones filled this way before) from its tool's last use. */
+function fillFromTool(draft: OpDraft, known: Known, prefilled: string[]) {
+  const names = fieldNames(draft.cls);
+  for (const key of TOOL_VALUES) {
+    if (!names.includes(key) || (draft.values[key] && !prefilled.includes(key))) continue;
+    const value = draft.tool ? known.byTool[draft.tool]?.[key] : undefined;
+    if (value) { draft.values[key] = value; if (!prefilled.includes(key)) prefilled.push(key); }
+    else if (prefilled.includes(key)) { delete draft.values[key]; prefilled.splice(prefilled.indexOf(key), 1); }
+  }
+}
+
+/** Chooses an operation's tool, and fills what the program already says about cutting with it. */
+export function setOpTool(key: string | null) {
+  const form = get().form;
+  if (form?.mode !== 'op') return;
+  const draft = { ...form.draft, tool: key, values: { ...form.draft.values } };
+  const prefilled = [...form.prefilled];
+  if (!form.editing) fillFromTool(draft, form.known, prefilled);
+  set({ form: { ...form, draft, prefilled }, message: null });
+}
+
+/**
+ * Fills a new operation's heights from the flat faces picked for it: its floor is their height (the lowest, when they
+ * differ), and it starts at the height the setup's material stands at. Only empty fields and ones filled this way.
+ */
+function fillHeights(key: string) {
+  const form = get().form;
+  const mesh = useApp.getState().part.mesh;
+  if (form?.mode !== 'op' || form.editing || !mesh) return;
+  const names = fieldNames(form.draft.cls);
+  const picked = form.draft.geometry[key]?.names ?? [];
+  const heights = picked.map((name) => mesh.faces.find((face) => face.name === name || face.names.includes(name))?.center?.[2]).filter((z): z is number => typeof z === 'number');
+  const draft = { ...form.draft, values: { ...form.draft.values } };
+  const prefilled = [...form.prefilled];
+  const fill = (field: string, value: string | null) => {
+    if (!names.includes(field) || (draft.values[field] && !prefilled.includes(field))) return;
+    if (value) { draft.values[field] = value; if (!prefilled.includes(field)) prefilled.push(field); }
+    else if (prefilled.includes(field)) { delete draft.values[field]; prefilled.splice(prefilled.indexOf(field), 1); }
+  };
+  fill('floor_z_mm', heights.length ? String(round(Math.min(...heights))) : null);
+  fill('top_z_mm', heights.length ? form.known.top : null);
+  set({ form: { ...form, draft, prefilled } });
+}
+
 /** The form of a new operation of `cls`, in `setupId` (else the selected or last setup). */
 export async function openNewOp(cls: string, setupId: string | null = null) {
   const waiting = get().form;
@@ -230,11 +287,19 @@ export async function openNewOp(cls: string, setupId: string | null = null) {
   const prefilled: string[] = [];
   if (tools.length === 1) draft.tool = tools[0].key;
   // The clearance height every operation of the setup shares, shown filled (the person sees and can change it).
-  const last = setup.operations.map((op) => readOp(read.model, op).draft).filter(Boolean).at(-1);
+  const drafts = setup.operations.map((op) => readOp(read.model, op).draft).filter((item): item is OpDraft => !!item);
+  const last = drafts.at(-1);
   if (last?.values.clearance_z_mm) { draft.values.clearance_z_mm = last.values.clearance_z_mm; prefilled.push('clearance_z_mm'); }
+  const known: Known = { byTool: {}, top: null };
+  for (const item of drafts) {
+    if (item.tool) known.byTool[item.tool] = { ...known.byTool[item.tool], ...Object.fromEntries(TOOL_VALUES.filter((key) => item.values[key]).map((key) => [key, item.values[key]])) };
+    if (item.cls === 'Facing' && item.values.floor_z_mm) known.top = item.values.floor_z_mm;
+  }
+  known.top ??= readSetup(read.model, setup).draft?.stockMax[2] || null;
+  if (draft.tool) fillFromTool(draft, known, prefilled);
   // A pending setup's operation is written into program.py as it was when the setup's form opened.
   const base = pending && waiting ? waiting.base : read.code;
-  open({ mode: 'op', setup: setup.id, editing: null, draft, tooling, workOffset, prefilled, pending, base }, firstGeometry(cls));
+  open({ mode: 'op', setup: setup.id, editing: null, draft, tooling, workOffset, prefilled, pending, base, known }, firstGeometry(cls));
 }
 
 /** The form of an operation of the program, or why it's edited in code. */
@@ -248,7 +313,7 @@ export async function openEditOp(operation: string) {
   await ensureShop();
   const setup = read.model.setups.find((item) => item.id === op.setup)!;
   const { tooling, workOffset } = setupContext(setup);
-  open({ mode: 'op', setup: op.setup, editing: operation, draft, tooling, workOffset, prefilled: [], pending: null, base: read.code }, null);
+  open({ mode: 'op', setup: op.setup, editing: operation, draft, tooling, workOffset, prefilled: [], pending: null, base: read.code, known: { byTool: {}, top: null } }, null);
 }
 
 /** Shows an operation's or setup's definition in program.py. */
@@ -446,6 +511,7 @@ export function pickIntoForm(face: number, point: [number, number, number]): boo
   if (kind === 'region') {
     if (!info || info.type !== 'PLANE' || !along(info.normal, 2)) { toast('Not a face it takes: pick flat faces facing up or down (along Z).', 'info'); return true; }
     toggle(nameFor(mesh.faces, face - 1));
+    fillHeights(key);
     return true;
   }
   if (kind === 'holes' || kind === 'point') {
