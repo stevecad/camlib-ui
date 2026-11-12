@@ -7,6 +7,7 @@ import { api, rangeFetch, type Build, type BuildSummary, type Info, type PartMes
 import { PlaybackStream, type StreamSetup } from './cam/stream';
 import { operationBands, streamMotion, toolNumbers, type Band } from './cam/playback';
 import type { Motion } from './cam/motion';
+import { moveOwners, parseStored, pruned, samePaths, setupToggled, soloed, storageKey, stored, toggled, type ProjectPaths, type SetupPaths } from './cam/pathVisibility';
 
 export interface OpenFile { text: string; saved: string; loading: boolean; error: string | null }
 
@@ -19,6 +20,8 @@ export interface PlayerSource {
   times: Float64Array;
   bands: Band[];
   numbers: number[];
+  /** The operation each move is drawn with (cam/pathVisibility.ts: a connecting move belongs to the one it leads to). */
+  owners: Uint32Array;
 }
 
 interface AppState {
@@ -83,6 +86,43 @@ export const usePlayer = create<PlayerState>(() => ({
   focus: null, stockError: null, stockStatus: null,
 }));
 
+/**
+ * The toolpaths hidden in the 3D view, for the project open: by setup id, then operation id (cam/pathVisibility.ts).
+ * Kept in localStorage per project. A display choice only: the playback and the stock run every operation.
+ */
+export const usePaths = create<{ project: string | null; setups: ProjectPaths }>(() => ({ project: null, setups: {} }));
+
+function keepPaths(setups: ProjectPaths) {
+  const project = usePaths.getState().project;
+  usePaths.setState({ setups });
+  if (!project) return;
+  try {
+    if (Object.keys(setups).length) localStorage.setItem(storageKey(project), stored(setups)); else localStorage.removeItem(storageKey(project));
+  } catch { /* private mode: kept for this visit */ }
+}
+
+/** Reads what the project hid on an earlier visit. */
+function loadPaths(project: string) {
+  let text: string | null = null;
+  try { text = localStorage.getItem(storageKey(project)); } catch { /* nothing kept */ }
+  usePaths.setState({ project, setups: parseStored(text) });
+}
+
+function changePaths(setup: string, change: (now: SetupPaths | undefined) => SetupPaths) {
+  const setups = { ...usePaths.getState().setups };
+  const next = change(setups[setup]);
+  if (next.hidden.length || next.solo) setups[setup] = next; else delete setups[setup];
+  keepPaths(setups);
+}
+
+/** Hides or shows one operation's toolpath. */
+export const togglePath = (setup: string, operation: string) => changePaths(setup, (now) => toggled(now, operation));
+/** Shows only one operation's toolpath of the setup's `all`; the same again puts back what was hidden before. */
+export const soloPath = (setup: string, operation: string, all: string[]) => changePaths(setup, (now) => soloed(now, operation, all));
+/** Hides every toolpath of a setup, or shows them all when any is hidden. */
+export const toggleSetupPaths = (setup: string, all: string[]) => changePaths(setup, (now) => setupToggled(now, all));
+export const showAllPaths = (setup: string) => changePaths(setup, () => ({ hidden: [], solo: null }));
+
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 export const toast = (text: string, tone: 'error' | 'info' = 'error', action?: { label: string; run: () => void }) => useApp.setState({ toast: { text, tone, action } });
 
@@ -120,8 +160,10 @@ export async function openProject(name: string) {
     project: null, files: {}, active: null, builds: [], build: null, busy: null, picked: null, selected: null, described: null,
     part: { status: 'none', mesh: null, error: null, revision: 0 },
   });
+  usePaths.setState({ project: null, setups: {} });
   const project = await api.project(name);
   localStorage.setItem(LAST, name);
+  loadPaths(name);
   history.replaceState(null, '', `?project=${encodeURIComponent(name)}`);
   useApp.setState({ project, builds: project.builds ?? [] });
   const first = DEFAULT_FILES.find((file) => project.files.some((item) => item.name === file));
@@ -355,6 +397,12 @@ export async function openPlayer(setupId: string | null) {
     const s = stream.header.setups.findIndex((setup) => setup.id === setupId);
     if (s < 0) throw new Error(`The stream has no setup ${setupId}.`);
     const header = stream.header.setups[s];
+    // The newest build's stream says which setups and operations there are: what was hidden of any other is dropped.
+    // (An older build shown again drops nothing: what it lacks may be in the newest.)
+    if (useApp.getState().builds.find((item) => item.mode === 'full' && item.status === 'done')?.id === build.id && usePaths.getState().project === useApp.getState().project?.name) {
+      const kept = pruned(usePaths.getState().setups, stream.header.setups.map((setup) => ({ id: setup.id, operations: setup.operations.map((op) => op.id) })));
+      if (!samePaths(kept, usePaths.getState().setups)) keepPaths(kept);
+    }
     const played = streamMotion(stream, s);
     for (let c = 0; c < header.chunks.length; c++) {
       await played.load(c);
@@ -363,7 +411,7 @@ export async function openPlayer(setupId: string | null) {
     }
     const source: PlayerSource = {
       build: build.id, stream, setup: s, header, motion: played.motion, times: played.times,
-      bands: operationBands(played.motion, header), numbers: toolNumbers(header),
+      bands: operationBands(played.motion, header), numbers: toolNumbers(header), owners: moveOwners(played.motion.operation, played.motion.count),
     };
     useApp.setState({ player: { status: 'ready', message: null, source, setup: setupId } });
   } catch (error) {

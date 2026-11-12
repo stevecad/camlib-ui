@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, FileCode, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { api } from '../api';
-import { openPlayer, seekMove, useApp, usePlayer, type PlayerSource } from '../state';
+import { openPlayer, seekMove, useApp, usePaths, usePlayer, type PlayerSource } from '../state';
 import { MOVE_KINDS, moveAt, moveForLine, positionAtTime, timeAtPosition, tipAt } from '../cam/motion';
 import { findingMove, severityOf } from '../cam/playback';
 import { KIND_COLORS, SEVERITY_COLORS } from './Viewport';
@@ -136,6 +136,9 @@ function Deck({ source }: { source: PlayerSource }) {
   const toggle = () => usePlayer.setState((state) => ({ playing: !state.playing, position: !state.playing && state.position >= motion.count ? 0 : state.position }));
   const setShow = (patch: Partial<typeof show>) => usePlayer.setState({ show: { ...show, ...patch } });
   const cell = header.stock.cell_mm;
+  // Toolpaths hidden in the browser (a display choice: everything here still covers every operation).
+  const paths = usePaths((state) => state.setups[header.id]);
+  const pathHiddenHere = motion.count > 0 && !!paths?.hidden.includes(header.operations[source.owners[index]]?.id ?? '');
   return (
     <div className="deck" id="player" role="toolbar" aria-label="Toolpath playback" data-moves={motion.count} data-position={position.toFixed(3)} data-line={motion.line[index]}>
       <div className="deck-top">
@@ -150,6 +153,9 @@ function Deck({ source }: { source: PlayerSource }) {
         </select>
         <span className="readout" id="player-readout">
           <span className="op-name">{band ? band.operation : 'Between operations'}</span>
+          {pathHiddenHere && show.toolpath && (
+            <span className="path-hidden" id="player-path-hidden" title="This operation’s toolpath is hidden in the browser, so its lines aren’t drawn. The tool, the stock and this readout still follow it.">path hidden</span>
+          )}
           <span>T<b>{source.numbers[motion.tool[index]] ?? '?'}</b></span>
           <span>Move <b>{index + 1}</b> / {motion.count}</span>
           <span className="kind"><i style={{ background: KIND_COLORS[kind] }} />{kind}</span>
@@ -176,7 +182,8 @@ function Deck({ source }: { source: PlayerSource }) {
               Stock: <b>{stockStatus.cutting !== null ? 'cutting…' : 'as cut'}</b> ({num(stockStatus.cell)} mm display; camlib checks on {num(cell[0])} mm)
             </span>}
         <span className="toggles">
-          <button type="button" className="toggle" data-on={show.toolpath || undefined} onClick={() => setShow({ toolpath: !show.toolpath })}>Toolpath</button>
+          <button type="button" className="toggle" data-on={show.toolpath || undefined} onClick={() => setShow({ toolpath: !show.toolpath })}
+            title="The toolpath’s lines, all at once. The eye on an operation’s row in the browser hides or shows that operation’s.">Toolpath</button>
           <span className="segmented">
             {(['solid', 'translucent', 'off'] as const).map((mode) => (
               <button key={mode} type="button" data-on={show.stock === mode || undefined} onClick={() => setShow({ stock: mode })}>{mode === 'solid' ? 'Stock' : mode === 'translucent' ? 'Clear' : 'Off'}</button>

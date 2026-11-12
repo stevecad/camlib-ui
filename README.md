@@ -38,7 +38,10 @@ Python, build it, see what camlib planned, checked and released, play it back on
 - **3D view** in work coordinates, navigated as in STEVE Studio (view cube, standard views, mouse styles of STEVE,
   SOLIDWORKS, Fusion and Onshape, the command palette on <kbd>Ctrl</kbd>+<kbd>K</kbd>, every shortcut on
   <kbd>?</kbd>): the part (click a face for its name), the stock as cut at any move, the toolpath coloured by move
-  kind, the tool and its holder, the fixtures the program placed.
+  kind, the tool and its holder, the fixtures the program placed. The eye on an operation's row in the browser hides
+  or shows that operation's toolpath (<kbd>Alt</kbd>+click shows only that one, and again puts the others back; a
+  setup's eye does all of its operations). The moves between operations go with the operation they lead to. It is a
+  display choice, kept per project: the playback, the tool and the stock still run every operation.
 - **Player**: play, step, scrub a timeline banded by operation with findings marked, at up to 500× machine time,
   beside the posted G-code (the current line follows playback; click a line to go to its move). The stock shows each
   tool's own profile swept through the moves on a fine grid; camlib's own check grid is a toggle away.

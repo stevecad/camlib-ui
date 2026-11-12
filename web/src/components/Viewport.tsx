@@ -7,15 +7,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Line } from '@react-three/drei';
 import * as THREE from 'three';
-import { Copy } from 'lucide-react';
+import { Copy, EyeOff } from 'lucide-react';
 import { CameraRig, Interaction } from '../viewport/CameraRig';
 import ViewCube from '../viewport/ViewCube';
 import NavBar from '../viewport/NavBar';
 import { useView, viewer } from '../viewport/viewer';
 import { pickedGeometry, pickIntoForm, useEditor, usePickingKind } from '../cam/programEditor';
-import { useApp, usePlayer, type PlayerSource } from '../state';
+import { showAllPaths, useApp, usePaths, usePlayer, type PlayerSource } from '../state';
 import type { MachineResult, PartMesh, SetupDescription } from '../api';
-import { alongMove, MOVE_KINDS, tipAt, type Motion } from '../cam/motion';
+import { MOVE_KINDS, tipAt, type Motion } from '../cam/motion';
+import { drawRanges, hiddenCount, hiddenOwners, ownerRuns } from '../cam/pathVisibility';
+import { toolpathLines } from '../cam/toolpathLines';
 import { fieldGrid, HeightStockView } from '../cam/heightStock';
 import { findingMove, severityOf, simPlan, simPosition, toolProfile, type SimPlan } from '../cam/playback';
 import type { SimReply, SimRequest } from '../cam/stockSim.worker';
@@ -296,42 +298,16 @@ void main() {
   gl_FragColor = vec4(vColor, mix(0.25, 0.95, played));
 }`;
 
-/** Each move as line segments (arcs and helices as chords along them), with its index, kind and length along it. */
-function toolpathLines(motion: Motion) {
-  const positions: number[] = [], moves: number[] = [], kinds: number[] = [], dists: number[] = [];
-  const point: [number, number, number] = [0, 0, 0];
-  let px = motion.start[0], py = motion.start[1], pz = motion.start[2];
-  const segment = (i: number, x: number, y: number, z: number, d0: number) => {
-    positions.push(px, py, pz, x, y, z);
-    moves.push(i, i);
-    kinds.push(motion.kind[i], motion.kind[i]);
-    const d1 = d0 + Math.hypot(x - px, y - py, z - pz);
-    dists.push(d0, d1);
-    px = x; py = y; pz = z;
-    return d1;
-  };
-  for (let i = 0; i < motion.count; i++) {
-    const x = motion.end[i * 3], y = motion.end[i * 3 + 1], z = motion.end[i * 3 + 2];
-    // A move that starts elsewhere (after a tool change): nothing is drawn from the previous end to its start.
-    const restart = motion.restarts.get(i);
-    if (restart) { px = restart[0]; py = restart[1]; pz = restart[2]; }
-    const sweep = motion.arcs?.curve[i] ? Math.abs(motion.arcs.sweep[i]) : 0;
-    if (!sweep) { segment(i, x, y, z, 0); continue; }
-    const start: [number, number, number] = [px, py, pz];
-    const steps = Math.max(2, Math.min(96, Math.ceil(sweep / (Math.PI / 24))));
-    let d = 0;
-    for (let k = 1; k <= steps; k++) {
-      alongMove(motion, i, start, k / steps, point);
-      d = segment(i, point[0], point[1], point[2], d);
-    }
-  }
-  return { positions: new Float32Array(positions), moves: new Float32Array(moves), kinds: new Float32Array(kinds), dists: new Float32Array(dists) };
-}
-
-function Toolpath({ motion }: { motion: Motion }) {
+/**
+ * The toolpath's lines, built once for a stream. The operations hidden in the browser are left out of the draw by
+ * giving the geometry only the vertex ranges of the others (its groups): hiding or showing one changes those few
+ * ranges and nothing else, whatever the program's size.
+ */
+function Toolpath({ motion, owners, hidden }: { motion: Motion; owners: Uint32Array; hidden: ReadonlySet<number> }) {
   const invalidate = useThree((state) => state.invalidate);
-  const { geometry, material } = useMemo(() => {
-    const { positions, moves, kinds, dists } = toolpathLines(motion);
+  const canvas = useThree((state) => state.gl.domElement);
+  const { geometry, materials, runs, first } = useMemo(() => {
+    const { positions, moves, kinds, dists, first } = toolpathLines(motion);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('aMove', new THREE.BufferAttribute(moves, 1));
@@ -342,11 +318,22 @@ function Toolpath({ motion }: { motion: Motion }) {
       vertexShader: VERTEX, fragmentShader: FRAGMENT, transparent: true, depthWrite: false,
       uniforms: { uPosition: { value: usePlayer.getState().position }, uDash: { value: 1.2 }, uColors: { value: MOVE_KINDS.map((kind) => new THREE.Color(KIND_COLORS[kind])) } },
     });
-    return { geometry, material };
-  }, [motion]);
-  useEffect(() => () => { geometry.dispose(); material.dispose(); }, [geometry, material]);
-  useEffect(() => usePlayer.subscribe((state) => { material.uniforms.uPosition.value = state.position; invalidate(); }), [material, invalidate]);
-  return <lineSegments geometry={geometry} material={material} renderOrder={12} raycast={() => {}} />;
+    // A material list makes three.js draw the geometry's groups, and only them.
+    return { geometry, materials: [material], runs: ownerRuns(owners), first };
+  }, [motion, owners]);
+  useEffect(() => () => { geometry.dispose(); materials[0].dispose(); }, [geometry, materials]);
+  useEffect(() => usePlayer.subscribe((state) => { materials[0].uniforms.uPosition.value = state.position; invalidate(); }), [materials, invalidate]);
+  useEffect(() => {
+    const ranges = drawRanges(runs, first, hidden);
+    geometry.clearGroups();
+    for (const range of ranges) geometry.addGroup(range.start, range.count, 0);
+    // What is drawn, readable from the page (as the player's data-moves): vertex ranges "start+count", of how many.
+    canvas.dataset.toolpathDrawn = ranges.map((range) => `${range.start}+${range.count}`).join(' ');
+    canvas.dataset.toolpathVertices = String(first[first.length - 1]);
+    invalidate();
+    return () => { delete canvas.dataset.toolpathDrawn; delete canvas.dataset.toolpathVertices; };
+  }, [geometry, runs, first, hidden, invalidate, canvas]);
+  return <lineSegments geometry={geometry} material={materials} renderOrder={12} raycast={() => {}} userData={{ toolpath: true }} />;
 }
 
 // ── Tool ────────────────────────────────────────────────────────────────────
@@ -398,19 +385,23 @@ function Tool({ source }: { source: PlayerSource }) {
 
 // ── Findings ────────────────────────────────────────────────────────────────
 
-function FindingMarks({ source, machine, size }: { source: PlayerSource; machine: MachineResult; size: number }) {
+/**
+ * camlib's findings where they are. A finding at a move of an operation whose toolpath is hidden goes with it, unless
+ * it is the one in focus (picked in the Result panel, which lists every finding whatever is hidden here).
+ */
+function FindingMarks({ source, machine, size, hidden }: { source: PlayerSource; machine: MachineResult; size: number; hidden: ReadonlySet<number> }) {
   const focus = usePlayer((state) => state.focus);
   const marks = useMemo(() => machine.findings.flatMap((finding, index) => {
     const move = findingMove(finding);
     if (move === null) return [];
     const at: [number, number, number] = [0, 0, 0];
     tipAt(source.motion, move + 1, at);
-    return [{ index, at, color: SEVERITY_COLORS[severityOf(finding)] }];
+    return [{ index, at, color: SEVERITY_COLORS[severityOf(finding)], owner: source.owners[Math.min(source.motion.count - 1, move)] }];
   }), [source, machine]);
   const r = Math.max(0.4, size * 0.006);
   return (
     <group>
-      {marks.map((mark) => (
+      {marks.filter((mark) => focus === mark.index || !hidden.has(mark.owner)).map((mark) => (
         <mesh key={mark.index} position={mark.at} renderOrder={30} raycast={() => {}}>
           <sphereGeometry args={[focus === mark.index ? r * 2.2 : r, 16, 12]} />
           <meshBasicMaterial color={mark.color} depthTest={false} transparent opacity={focus === null || focus === mark.index ? 0.95 : 0.45} />
@@ -489,6 +480,9 @@ export default function Viewport() {
   const formOpen = useEditor((state) => !!state.form);
   const streaming = !!source && show.stock !== 'off' && !formOpen;
   const plan = useMemo(() => (source ? simPlan(source) : null), [source]);
+  // The operations whose toolpath the browser hides (the setup playing's). The stock, the tool and the playback don't use it.
+  const hiddenIds = usePaths((state) => (source ? state.setups[source.header.id]?.hidden : undefined));
+  const hidden = useMemo(() => hiddenOwners(source?.header.operations.map((op) => op.id) ?? [], hiddenIds), [source, hiddenIds]);
   return (
     <div className="viewport" id="viewport">
       <Canvas frameloop="demand" dpr={[1, 2]} gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }} camera={{ position: [240, -240, 200], up: [0, 0, 1], near: 0.1, far: 100000 }}
@@ -506,16 +500,31 @@ export default function Viewport() {
           ? <GridStock source={source} mode={show.stock as 'solid' | 'translucent'} />
           : <DisplayStock source={source} plan={plan} mode={show.stock as 'solid' | 'translucent'} />)}
         {setup?.machines[0] && show.fixtures && <Fixtures machine={setup.machines[0]} />}
-        {source && show.toolpath && !formOpen && <Toolpath motion={source.motion} />}
+        {source && show.toolpath && !formOpen && <Toolpath motion={source.motion} owners={source.owners} hidden={hidden} />}
         {source && show.tool && !formOpen && <Tool source={source} />}
-        {source && !formOpen && machineResult && machineResult.findings.some((finding) => finding.move != null) && <FindingMarks source={source} machine={machineResult} size={size} />}
+        {source && !formOpen && machineResult && machineResult.findings.some((finding) => finding.move != null) && <FindingMarks source={source} machine={machineResult} size={size} hidden={hidden} />}
       </Canvas>
       <ViewCube disabled={!box} />
       <NavBar disabled={!box} />
       <PickedFace />
+      {source && !formOpen && <HiddenPaths source={source} />}
       {part.status === 'loading' && <div className="viewport-note">Reading the part…</div>}
       {part.status === 'error' && <div className="viewport-note" data-tone="danger">The part couldn’t be read: {part.error}</div>}
     </div>
+  );
+}
+
+/** Toolpaths are hidden (the browser's eyes): how many, and all of them back in a click. */
+function HiddenPaths({ source }: { source: PlayerSource }) {
+  const paths = usePaths((state) => state.setups[source.header.id]);
+  const ids = source.header.operations.map((op) => op.id);
+  const count = hiddenCount(paths, ids);
+  if (!count) return null;
+  return (
+    <button type="button" className="paths-note" id="paths-show-all" onClick={() => showAllPaths(source.header.id)}
+      title={`${count} of this setup’s ${new Set(ids).size} toolpaths ${count === 1 ? 'is' : 'are'} hidden (the eye on an operation’s row in the browser). Only their lines: the playback, the tool, the stock and the timeline still run every operation. Click to show them all.`}>
+      <EyeOff size={12} />{count} {count === 1 ? 'toolpath' : 'toolpaths'} hidden<b>Show all</b>
+    </button>
   );
 }
 

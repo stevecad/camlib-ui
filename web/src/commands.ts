@@ -8,7 +8,7 @@ import {
   Save, ScanSearch, Settings, SkipBack, SkipForward, Square, StepBack, StepForward,
 } from 'lucide-react';
 import * as THREE from 'three';
-import { cancelBuild, dirtyFiles, openPlayer, revealIn, running, saveAll, startBuild, useApp, usePlayer } from './state';
+import { cancelBuild, dirtyFiles, openPlayer, revealIn, running, saveAll, showAllPaths, startBuild, useApp, usePaths, usePlayer } from './state';
 import { openNewOp, openSetup, useProgram } from './cam/programEditor';
 import { availableSpecs, fieldsLoaded, OP_SPECS } from './cam/opSpecs';
 import { opIconOf, PostIcon, SetupIcon, SimulateToolIcon, ToolpathIcon } from './icons';
@@ -152,6 +152,9 @@ export const commands: Command[] = [
     run: () => togglePanelTab('gcode'), active: () => app().panelOpen && app().tab === 'gcode', enabled: needsProject },
   { id: 'sim.grid', label: 'camlib’s check grid', icon: Grid3x3, category: 'Simulation', description: 'Show the stock camlib checked (its own grid) instead of the fine display stock.',
     run: () => usePlayer.setState((state) => ({ show: { ...state.show, grid: !state.show.grid } })), active: () => usePlayer.getState().show.grid, enabled: needsPlayer },
+  { id: 'sim.showPaths', label: 'Show all toolpaths', icon: Eye, category: 'Simulation', description: 'Show again the toolpaths hidden with the eye on an operation’s row in the browser (the playing setup’s).',
+    run: () => { const setup = app().player.source?.header.id; if (setup) showAllPaths(setup); },
+    enabled: () => { const setup = app().player.source?.header.id; return setup && usePaths.getState().setups[setup]?.hidden.length ? true : 'No toolpath is hidden.'; } },
 
   // View
   { id: 'inspect.zoomSelection', label: 'Zoom to selection', icon: ScanSearch, category: 'View', shortcut: 'Z', keys: ['z'], description: 'Frame the picked face.',

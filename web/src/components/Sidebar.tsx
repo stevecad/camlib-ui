@@ -11,7 +11,8 @@ import {
   ArrowDown, ArrowUp, Box, ChevronsDownUp, Code2, Copy, Download, Eye, EyeOff, Focus, Hammer, Layers, ListChecks, ListTree, PanelLeftClose, Pencil, Play, Plus,
   ShieldAlert, Trash2, Upload, Wrench,
 } from 'lucide-react';
-import { openPlayer, revealIn, running, startBuild, useApp, usePlayer, uploadFile } from '../state';
+import { openPlayer, revealIn, running, showAllPaths, soloPath, startBuild, togglePath, toggleSetupPaths, useApp, usePaths, usePlayer, uploadFile } from '../state';
+import { hiddenCount, pathHidden, setupState } from '../cam/pathVisibility';
 import { deleteProgramOp, duplicateProgramOp, moveProgramOp, openEditOp, openNewOp, openSetup, showInCode, useProgram } from '../cam/programEditor';
 import { availableSpecs } from '../cam/opSpecs';
 import type { CamOp, CamSetup } from '../cam/pyCode';
@@ -58,14 +59,25 @@ function BrowserGroup({ title, icon, children, actions, defaultOpen = true, coun
   );
 }
 
-function EyeButton({ shown, name, onToggle }: { shown: boolean; name: string; onToggle: () => void }) {
+/**
+ * A row's eye. `mixed`: some of what it stands for is hidden (a setup with some toolpaths hidden). `onAlt`: what an
+ * Alt-click does instead (an operation: show only its toolpath). `hint`: more for the tooltip.
+ */
+function EyeButton({ shown, name, onToggle, mixed, onAlt, hint, label }: {
+  shown: boolean; name: string; onToggle: () => void; mixed?: boolean; onAlt?: () => void; hint?: string; label?: string;
+}) {
+  const says = label ?? `${shown ? 'Hide' : 'Show'} ${name}`;
   return (
-    <button type="button" className={styles.eye} data-hidden={!shown || undefined} aria-label={`${shown ? 'Hide' : 'Show'} ${name}`} aria-pressed={shown}
-      title={`${shown ? 'Hide' : 'Show'} ${name}`} onClick={(event) => { event.stopPropagation(); onToggle(); }}>
-      {shown ? <Eye size={13} /> : <EyeOff size={13} />}
+    <button type="button" className={styles.eye} data-hidden={(!shown && !mixed) || undefined} data-mixed={mixed || undefined} aria-label={says}
+      aria-pressed={mixed ? 'mixed' : shown} title={hint ? `${says}\n${hint}` : says} onDoubleClick={(event) => event.stopPropagation()}
+      onClick={(event) => { event.stopPropagation(); if (event.altKey && onAlt) onAlt(); else onToggle(); }}>
+      {shown || mixed ? <Eye size={13} /> : <EyeOff size={13} />}
     </button>
   );
 }
+
+/** What hiding a toolpath does not do, for the tooltips. */
+const STILL_RUNS = 'Only its lines in the view: the playback, the tool and the stock still run every operation.';
 
 function OriginGroup() {
   const show = useView((state) => state.showOrigin);
@@ -217,6 +229,12 @@ function SetupRows({ view, locked }: { view: SetupView; locked: string | null })
   const playing = player.status === 'ready' && player.source?.header.id === view.id ? player.source : null;
   const play = () => void openPlayer(view.id);
   const stock = view.described?.stock;
+  // The operations with a toolpath to show: the ones the build shown planned (the tree may be ahead of it).
+  const built = useMemo(() => (playable ? [...stats.keys()] : []), [playable, stats]);
+  const paths = usePaths((state) => state.setups[view.id]);
+  const pathState = setupState(paths, built);
+  const hiddenPaths = hiddenCount(paths, built);
+  const togglePaths = () => toggleSetupPaths(view.id, built);
   const lines = (): Line[] => [
     { label: 'Edit setup', icon: <Pencil {...I} />, reason: locked, run: () => void openSetup(view.id) },
     { label: 'Add 2D operation', icon: <Plus {...I} />, id: 'add-2d', reason: locked, items: addLines(view.id, '2D') },
@@ -227,6 +245,10 @@ function SetupRows({ view, locked }: { view: SetupView; locked: string | null })
     { label: 'Simulate this setup', icon: <Play {...I} />, reason: playable ? null : 'Build the program first.', run: play },
     ...downloadLines(view.id),
     { label: 'Edit code', icon: <Code2 {...I} />, run: () => void showInCode(view.id) },
+    'sep',
+    pathState === 'shown'
+      ? { label: 'Hide all toolpaths', icon: <EyeOff {...I} />, reason: built.length ? null : 'Build the program first.', run: togglePaths }
+      : { label: 'Show all toolpaths', icon: <Eye {...I} />, run: () => showAllPaths(view.id) },
     'sep',
     { label: 'New setup', icon: <SetupIcon {...I} />, reason: locked, run: () => void openSetup() },
   ];
@@ -241,9 +263,14 @@ function SetupRows({ view, locked }: { view: SetupView; locked: string | null })
           `${view.ops.length} operations. Double-click to edit it; right-click to add an operation.`,
         ].filter(Boolean).join('\n')}
         onClick={() => { select(handle); if (playable && !playing) play(); }} onDoubleClick={() => { if (locked) void showInCode(view.id); else void openSetup(view.id); }}
-        onContextSelect={() => select(handle)} menu={lines} />
+        onContextSelect={() => select(handle)} menu={lines}
+        actions={built.length > 0 && (
+          <EyeButton shown={pathState === 'shown'} mixed={pathState === 'mixed'} name={`the toolpaths of ${view.id}`} onToggle={togglePaths}
+            label={`${pathState === 'shown' ? 'Hide' : 'Show'} all the toolpaths of ${view.id}`}
+            hint={`${pathState === 'mixed' ? `${hiddenPaths} of ${built.length} are hidden. ` : pathState === 'hidden' ? 'All are hidden. ' : ''}${STILL_RUNS}`} />
+        )} />
       {view.ops.map((op, index) => (
-        <OperationRow key={`${op.id}:${index}`} setup={view} op={op} index={index} stat={stats.get(op.id)} playable={playable} locked={locked}
+        <OperationRow key={`${op.id}:${index}`} setup={view} op={op} index={index} stat={stats.get(op.id)} playable={playable} locked={locked} built={built}
           dropAt={drop?.op === op.id ? drop.at : null}
           drag={locked || !op.op ? undefined : {
             draggable: true,
@@ -272,11 +299,20 @@ function SetupRows({ view, locked }: { view: SetupView; locked: string | null })
   );
 }
 
-function OperationRow({ setup, op, index, stat, playable, locked, drag, dropAt }: {
+function OperationRow({ setup, op, index, stat, playable, locked, built, drag, dropAt }: {
   setup: SetupView; op: SetupView['ops'][number]; index: number; stat?: { moves: number; seconds: number }; playable: boolean; locked: string | null;
+  /** The setup's operations that have a toolpath (in the build shown). */
+  built: string[];
   drag?: TreeRowProps['drag']; dropAt: 'before' | 'after' | null;
 }) {
   const selected = useApp((state) => state.selected);
+  // Its toolpath in the 3D view: there once the build shown planned it; hidden or shown from its eye.
+  const paths = usePaths((state) => state.setups[setup.id]);
+  const hasPath = built.includes(op.id);
+  const pathShown = !pathHidden(paths, op.id);
+  const alone = hasPath && built.length > 1 && hiddenCount(paths, built) === built.length - 1 && pathShown;
+  const noPath = hasPath ? null : 'Build the program first.';
+  const solo = () => soloPath(setup.id, op.id, built);
   // While a build runs: whether camlib has planned this operation, or is planning it now.
   const building = useApp((state) => (running(state.build) ? treeState(state.build?.progress, setup.id, op.id) : null));
   const handle = `operation:${setup.id}/${op.id}`;
@@ -305,6 +341,11 @@ function OperationRow({ setup, op, index, stat, playable, locked, drag, dropAt }
         ].filter(Boolean).join(' · ') + `\n${playable ? 'Click to play from its start; d' : 'D'}ouble-click to edit it${known ? '' : ' in code'}; drag to reorder.`}
         onClick={() => { select(handle); if (playable) void playFrom(); }} onDoubleClick={edit} onContextSelect={() => select(handle)}
         onKeyDown={known ? rowKeys({ remove: () => void deleteProgramOp(op.id), edit, duplicate: () => void duplicateProgramOp(op.id) }) : undefined}
+        dimmed={hasPath && !pathShown}
+        actions={hasPath && (
+          <EyeButton shown={pathShown} name={`the toolpath of ${op.id}`} onToggle={() => togglePath(setup.id, op.id)} onAlt={solo}
+            hint={`Alt-click: ${alone ? 'show the others again' : 'show only this one'}.\n${STILL_RUNS}`} />
+        )}
         menu={() => [
           { label: 'Edit', icon: <Pencil {...I} />, reason: why, run: () => void openEditOp(op.id) },
           { label: 'Duplicate', icon: <Copy {...I} />, shortcut: displayShortcut('Mod+D'), reason: why, run: () => void duplicateProgramOp(op.id) },
@@ -313,6 +354,8 @@ function OperationRow({ setup, op, index, stat, playable, locked, drag, dropAt }
           { label: 'Move down', icon: <ArrowDown {...I} />, reason: why ?? (index === count - 1 ? 'It runs last in its setup.' : null), run: () => void moveProgramOp(op.id, index + 1) },
           'sep',
           { label: 'Play from here', icon: <Play {...I} />, reason: playable ? null : 'Build the program first.', run: () => void playFrom() },
+          { label: pathShown ? 'Hide toolpath' : 'Show toolpath', icon: pathShown ? <EyeOff {...I} /> : <Eye {...I} />, reason: noPath, run: () => togglePath(setup.id, op.id) },
+          { label: alone ? 'Show the other toolpaths again' : 'Show only this toolpath', icon: <Focus {...I} />, shortcut: 'Alt+click', reason: noPath ?? (built.length > 1 ? null : 'It is the setup’s only toolpath.'), run: solo },
           ...downloadLines(setup.id),
           { label: 'Edit code', icon: <Code2 {...I} />, run: () => void showInCode(op.id) },
           'sep',
