@@ -13,6 +13,7 @@ import Player, { GcodePanel } from './Player';
 import dock from '../shell/Dock.module.css';
 import CodePanel from './CodePanel';
 import ResultPanel, { outcome } from './ResultPanel';
+import { runningStatus } from '../cam/progress';
 import Dialogs, { Shortcut } from './Dialogs';
 import PanelRail from './PanelRail';
 import { usePanelWidth, useWindowWidth } from '../shell/panels';
@@ -39,7 +40,9 @@ function TopBar() {
         <Search size={13} /><span>Commands, projects, files…</span><Shortcut keys={displayShortcut('Mod+K')!} />
       </button>
       <span className="spacer" />
-      {build && <span className="build-state" data-status={build.status}>{build.mode === 'full' ? 'Build' : 'Check'}: {outcome(build)}</span>}
+      {build && <span className="build-state" id="build-state" data-status={build.status} data-stage={active ? build.progress?.stage : undefined} role="status">
+        {build.status === 'queued' || build.status === 'running' ? runningStatus(build.mode, build.status, build.progress) : `${build.mode === 'full' ? 'Build' : 'Check'}: ${outcome(build)}`}
+      </span>}
       {active
         ? <button type="button" className="button small" id="cancel-build" onClick={() => void cancelBuild()}><Square size={12} />Cancel</button>
         : <>

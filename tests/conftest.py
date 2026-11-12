@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from camlib_ui.projects import HIDDEN as HIDDEN_BUILDS  # noqa: F401  (tests read a build's own directory)
 from camlib_ui.server import create_app
 
 
@@ -26,6 +27,21 @@ def build(client: TestClient, project: str, mode: str = "full") -> dict:
     started = client.post(f"/api/projects/{project}/builds", json={"mode": mode})
     assert started.status_code == 200, started.text
     return wait_for(client, project, started.json()["id"])
+
+
+def watch(client: TestClient, project: str, mode: str = "full", timeout: float = 300) -> tuple[dict, list[dict]]:
+    """Starts a build and reads it often until it ends; returns it and every "progress" it gave while it ran."""
+    started = client.post(f"/api/projects/{project}/builds", json={"mode": mode})
+    assert started.status_code == 200, started.text
+    seen, deadline = [], time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        found = client.get(f"/api/projects/{project}/builds/{started.json()['id']}").json()
+        if found["status"] not in ("queued", "running"):
+            return found, seen
+        if "progress" in found:
+            seen.append(found["progress"])
+        time.sleep(0.05)
+    raise TimeoutError(f"build of {project} didn't finish in {timeout} s")
 
 
 def edit(client: TestClient, project: str, name: str, change) -> None:

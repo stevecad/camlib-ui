@@ -146,6 +146,15 @@ A build runs in two processes. Stage 1 runs your files and hands back plain data
 everything it started has been killed), stage 2 rebuilds camlib's job and machines from that data, using camlib's own
 posts by name, and does everything else. Your program's code never runs where its G-code is checked and released.
 
+While a build runs, the top bar and the Result panel say what it is doing: its stage (running the program, planning,
+posting and checking, writing the playback, deciding the release) and, while camlib plans, each of the setup's
+operations as pending, being planned or done. The operation being planned shows how far along it is where camlib
+counts something: depth levels, finishing passes, or the area cleared by an adaptive clearing (camlib's planning
+progress, `camlib.simulation.ProgressUpdate`). An operation camlib counts nothing for (drilling, facing) shows a moving
+bar and no percentage, and there is no percentage for the whole build: none is estimated. The model tree marks the same
+operations. With a camlib that has no planning progress, the stage and the operations finished so far are shown. This
+is for watching only: nothing of it is kept in the build's result, and the build is the same with or without it.
+
 A build's result has, per setup and machine: the G-code (when released), camlib's findings (each at its move: click it
 to see it in the playback), what wasn't checked, the moves, time and stock figures, and the playback stream
 (`docs/playback-stream.md`). Builds are kept in the project's `.builds/` folder (the last 20).

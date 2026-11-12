@@ -9,7 +9,9 @@
     POST   /api/outline {"code"}                         a program's outline for the forms (nothing runs)
     GET    /api/operation-fields                        camlib's operations' fields, from the installed camlib
     POST   /api/projects/{p}/builds {"mode"}            a build: "preview" (describe) or "full" (plan, check, post)
-    GET    /api/projects/{p}/builds[/{id}]              builds; one with camlib's result, the program's error, its log
+    GET    /api/projects/{p}/builds[/{id}]              builds; one with camlib's result, the program's error, its log;
+                                                        a running one with its "progress" (its stage, the operation
+                                                        camlib is planning and how far: camlib_ui/build/progress.py)
     POST   /api/projects/{p}/builds/{id}/cancel
     GET    /api/projects/{p}/builds/{id}/files/{name}   released G-code (gcode-<n>.nc), the playback stream (ranges)
     GET    /api/projects/{p}/builds/{id}/src/{name}     a source file as the build used it

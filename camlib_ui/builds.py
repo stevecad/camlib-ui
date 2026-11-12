@@ -4,6 +4,10 @@ files camlib released (gcode-<n>.nc) with the playback stream (cam-playback.bin)
 
 Statuses: queued, running, done (result.json says whether the program built: ok, and per setup and machine whether
 camlib released its G-code), failed (the build itself stopped: a timeout, a crash), cancelled.
+
+A running build also says what it is doing (its stage, the operation camlib is planning and how far along):
+progress.json, which the build process rewrites as it goes (camlib_ui/build/progress.py). It is given only while the
+build runs ("progress" in its summary) and removed when the build ends: it is no part of the build's result.
 """
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from .build.progress import clear_progress, read_progress
 from .projects import HIDDEN, Projects
 
 KEEP = 20            # builds kept per project (the newest)
@@ -43,6 +48,7 @@ class Builds:
                 if (path / "status.json").is_file() and self._status(path).get("status") in ("queued", "running"):
                     self._write_status(path, status="failed", error="The server stopped during the build.",
                                        finished=time.time())
+                    clear_progress(path)
 
     def directory(self, project: str) -> Path:
         return self.projects.path(project) / HIDDEN
@@ -109,6 +115,7 @@ class Builds:
             process.wait()
             with self.lock:
                 self.running.pop(build, None)
+            clear_progress(path)   # The build is over, however it ended (it removes its own when it ends by itself).
         if self._status(path).get("status") == "cancelled":
             return
         if error is None and not (path / "result.json").is_file():
@@ -136,10 +143,15 @@ class Builds:
                 shutil.rmtree(old, ignore_errors=True)
 
     def summary(self, project: str, build: str) -> dict:
-        """The build's status, and when it is done, its outcome in a few words (released / refused counts)."""
+        """The build's status; while it runs, what it is doing ("progress": camlib_ui.build.progress.read_progress); and
+        when it is done, its outcome in a few words (released / refused counts)."""
         path = self.path(project, build)
         status = self._status(path)
         out = {k: status.get(k) for k in ("id", "mode", "status", "created", "started", "finished", "error")}
+        if status.get("status") == "running":
+            progress = read_progress(path)
+            if progress is not None:
+                out["progress"] = progress
         result = self._result(path)
         if result is not None:
             out["ok"] = bool(result.get("ok"))

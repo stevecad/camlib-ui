@@ -16,6 +16,8 @@ export type BuildStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 export interface BuildSummary {
   id: string; mode: 'preview' | 'full'; status: BuildStatus; created: number; started: number | null; finished: number | null;
   error: string | null; ok?: boolean; released?: number; refused?: number;
+  /** Only while it runs: what the build is doing (cam/progress.ts). Never part of its result. */
+  progress?: import('./cam/progress').BuildProgress;
 }
 
 export interface ToolSummary {
