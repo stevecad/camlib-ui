@@ -21,6 +21,10 @@ directory of its own, then moves into the build's directory:
   - cam-playback.bin: every move of the decoded posted program with the stock it removes (docs/playback-stream.md).
 
 A preview runs stage 1 and stage 2's checks and describes the program; nothing is planned.
+
+While it runs, the build says what it is doing in progress.json in the build's directory (camlib_ui/build/progress.py):
+its stage, and camlib's own planning progress of the operation being planned. That file is for the interface while it
+waits: nothing of it goes into the result, and it is gone when the build ends.
 """
 from __future__ import annotations
 
@@ -424,9 +428,12 @@ class Clock:
         return max(1.0, self.deadline - time.monotonic())
 
 
-def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(), artifact=None):
+def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(), artifact=None, progress=None):
     """One setup posted for one machine: statistics (and the playback stream) from the posted, decoded and replayed
-    program, camlib's findings, and its G-code if camlib's export releases it."""
+    program, camlib's findings, and its G-code if camlib's export releases it. `progress` (camlib_ui.build.progress) is
+    told what camlib is planning; it changes nothing of the run."""
+    from camlib_ui.build.progress import INTERVAL_S, Progress
+    progress = progress or Progress(None)
     from camlib.export import ExportRefused, unchecked as missing
     from camlib.simulation import checked_length, stock_state
     clock_start = time.monotonic()
@@ -434,10 +441,16 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
     # camlib's own report of each operation as it planned it (the last one it gave: an operation's end carries the
     # whole plan's figures), kept as given for the result. Called while the run is read; a list append only.
     reports = {}
+
+    def on_operation(update):
+        if isinstance(update.report, dict):
+            reports[update.operation] = update.report
+        progress.on_operation(update)
     options = dict(machine=target.machine, post=target.post_class, decoder=target.decoder_class,
-                   verification=verification,
-                   on_operation=lambda update: reports.__setitem__(update.operation, update.report)
-                   if isinstance(update.report, dict) else None)
+                   verification=verification, on_operation=on_operation)
+    # camlib's planning progress, where this camlib has it (#198): transient, the run is the same with or without it.
+    if progress.engine:
+        options.update(on_progress=progress.on_progress, progress_interval_s=INTERVAL_S)
     if target.lowering is not None:
         options["lowering"] = target.lowering
     run = job.post(setup.id, **options)
@@ -453,6 +466,7 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
         order = [o["id"] for o in config["operations"]]
         operations = {op: dict(id=op, moves=0, cut_mm=0.0, rapid_mm=0.0, seconds=0.0) for op in order}
         count = status["available"]
+        progress.stage("playback")
         state = stock_state(run.wait_ready()) if stream is not None else None
         writer = None
         if stream is not None:
@@ -493,6 +507,7 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
                       seconds=round(status["seconds"], 3), lines=posting["lines"],
                       arc_output=posting.get("arc_output"), plan_s=round(planned_s, 3),
                       **({"stock_remaining_mm3": remaining} if remaining else {}))
+        progress.stage("release")
         try:
             exported = run.export(artifact, accept=program_accept, timeout=clock.left())
         except ExportRefused as refused:
@@ -549,8 +564,10 @@ def _publish(work, job_dir, names):
         os.replace(work / name, job_dir / name)
 
 
-def build(request_path, started, log):
+def build(request_path, started, log, progress=None):
     """The build's metadata; its files are put in the build's directory (the request's)."""
+    from camlib_ui.build.progress import Progress
+    progress = progress or Progress(None)
     request = json.loads(Path(request_path).read_text())
     mode = request.get("mode", "full")
     if mode not in ("preview", "full"):
@@ -560,6 +577,7 @@ def build(request_path, started, log):
     (job_dir / "stage1").mkdir(exist_ok=True)
     timings = {}
     t0 = time.monotonic()
+    progress.stage("program")
     try:
         data = run_stage1(request_path, clock, log)
     except BaseException:
@@ -569,8 +587,9 @@ def build(request_path, started, log):
     # Stage 2: nothing of stage 1 runs any more. Its own directory and temporary files from here on.
     work = _fresh_directory(job_dir)
     os.chdir(work)
+    progress.stage("describe")
     try:
-        return _stage2(data, mode, clock, started, timings, work, job_dir)
+        return _stage2(data, mode, clock, started, timings, work, job_dir, progress)
     except BaseException:
         _publish(work, job_dir, [])   # Nothing stage 1 left under an output's name goes out with the error.
         raise
@@ -580,7 +599,7 @@ def build(request_path, started, log):
         shutil.rmtree(work, ignore_errors=True)
 
 
-def _stage2(data, mode, clock, started, timings, work, job_dir):
+def _stage2(data, mode, clock, started, timings, work, job_dir, progress):
     """Stage 2 in its own directory `work`: stage 1's data checked and rebuilt, then planned, checked, posted and
     released by camlib; its outputs moved into the job directory."""
     os.environ.update(TMPDIR=str(work / "tmp"), HOME=str(work))
@@ -595,6 +614,7 @@ def _stage2(data, mode, clock, started, timings, work, job_dir):
         if mode == "full":
             t1 = time.monotonic()
             setups, programs, streams = [], [], []
+            runs = sum(len(targets[setup.id]) for setup in compiled.setups)
             with open("cam-playback.body", "wb") as body:
                 for setup in compiled.setups:
                     entry = dict(id=setup.id, operations=None, machines=[])
@@ -602,9 +622,11 @@ def _stage2(data, mode, clock, started, timings, work, job_dir):
                         if len(programs) >= MAX_PROGRAMS:
                             raise ValueError(f"A build posts at most {MAX_PROGRAMS} programs (setups × machines).")
                         artifact = f"gcode-{len(programs) + 1}.nc"
+                        progress.begin_run(setup.id, target.key, len(programs), runs,
+                                           [(o["id"], o.get("kind")) for o in setup.config["operations"]])
                         result, operations, writer = _post(job, setup, target, clock,
                                                            stream=body if position == 0 else None,
-                                                           program_accept=accept, artifact=artifact)
+                                                           program_accept=accept, artifact=artifact, progress=progress)
                         if position == 0:
                             entry["operations"] = operations
                             entry["seconds"] = result["seconds"]
@@ -616,6 +638,7 @@ def _stage2(data, mode, clock, started, timings, work, job_dir):
                         if result["gcode"]:
                             outputs.append(result["gcode"])
                     setups.append(entry)
+            progress.stage("files")
             from camlib_ui.build.stream import write
             write(STREAM, streams, "cam-playback.body", camlib=metadata["camlib"])
             outputs.append(STREAM)
@@ -648,11 +671,13 @@ def verify_outputs(metadata, job_dir):
 def main(request_path):
     """Builds; writes result.json ({"ok": true, "metadata": ...} or {"ok": false, "error": ...}) in the build's
     directory. The log (stage 1's output too) is log.txt there."""
+    from camlib_ui.build.progress import Progress
     started = time.monotonic()
     job_dir = Path(request_path).resolve().parent
+    progress = Progress(job_dir)
     with open(job_dir / "log.txt", "ab", buffering=0) as log:
         try:
-            metadata = build(Path(request_path).resolve(), started, log)
+            metadata = build(Path(request_path).resolve(), started, log, progress)
             if metadata.get("setups") is not None:
                 verify_outputs(metadata, job_dir)
             result = {"ok": True, "metadata": metadata}
@@ -660,6 +685,8 @@ def main(request_path):
             message = str(error) if isinstance(error, ProgramFailed) else traceback.format_exc()[-12000:]
             log.write(traceback.format_exc().encode())
             result = {"ok": False, "error": message, "reason": "memory" if isinstance(error, MemoryError) else None}
+        finally:
+            progress.close()   # Transient: gone before the result is there.
     text = json.dumps(result, allow_nan=False, default=str)
     (job_dir / "result.json.tmp").write_text(text)
     os.replace(job_dir / "result.json.tmp", job_dir / "result.json")

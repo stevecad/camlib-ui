@@ -110,6 +110,8 @@ export async function refreshProjects() {
 }
 
 let polling: { build: string; timer: number } | null = null;
+/** How often a running build is read again: its progress changes a few times a second, and is shown at least once a second. */
+const POLL_MS = 500;
 
 export async function openProject(name: string) {
   if (polling) { clearTimeout(polling.timer); polling = null; }
@@ -127,6 +129,8 @@ export async function openProject(name: string) {
   void loadPart();
   const latest = (project.builds ?? [])[0];
   if (latest) await showBuild(latest.id);
+  // A build still running (the page was reloaded during it): its progress is in the Result panel.
+  if (running(useApp.getState().build)) useApp.setState({ tab: 'result', panelOpen: true });
   // The browser's setups come from the latest build that described the program: if the latest failed, an earlier one.
   if (!useApp.getState().described) await describeFromHistory(name);
 }
@@ -312,12 +316,13 @@ export async function showBuild(id: string) {
   if (useApp.getState().project?.name !== project.name) return;
   useApp.setState((state) => ({
     build, busy: running(build) ? build.status : null,
-    builds: state.builds.map((item) => (item.id === build.id ? { ...item, ...build } : item)),
+    // Its progress is there only while it runs: none is kept from an earlier read.
+    builds: state.builds.map((item) => (item.id === build.id ? { ...item, ...build, progress: build.progress } : item)),
     // A build that ran the program describes it; one that didn't leaves the browser as it was.
     described: build.metadata?.program ? { build: build.id, program: build.metadata.program } : state.described,
   }));
   if (running(build)) {
-    polling = { build: id, timer: window.setTimeout(() => void showBuild(id), 800) };
+    polling = { build: id, timer: window.setTimeout(() => void showBuild(id), POLL_MS) };
     return;
   }
   if (build.status === 'done' && build.mode === 'full' && build.files['cam-playback.bin']) {

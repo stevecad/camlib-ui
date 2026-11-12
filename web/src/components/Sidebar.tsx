@@ -23,6 +23,7 @@ import TreeRow, { type Entry, type Line, type TreeRowProps } from './TreeRow';
 import styles from '../shell/Browser.module.css';
 import dock from '../shell/Dock.module.css';
 import { clock } from './Player';
+import { treeState } from '../cam/progress';
 
 const I = { size: 15 };
 const num = (value: number | null | undefined, digits = 2) => (value == null ? '—' : Number(value.toFixed(digits)).toLocaleString());
@@ -275,6 +276,8 @@ function OperationRow({ setup, op, index, stat, playable, locked, drag, dropAt }
   drag?: TreeRowProps['drag']; dropAt: 'before' | 'after' | null;
 }) {
   const selected = useApp((state) => state.selected);
+  // While a build runs: whether camlib has planned this operation, or is planning it now.
+  const building = useApp((state) => (running(state.build) ? treeState(state.build?.progress, setup.id, op.id) : null));
   const handle = `operation:${setup.id}/${op.id}`;
   const summary = op.summary;
   const tool = summary ? setup.described?.tools.find((item) => item.id === summary.tool) : null;
@@ -292,7 +295,9 @@ function OperationRow({ setup, op, index, stat, playable, locked, drag, dropAt }
   return (
     <div data-operation-row={op.id}>
       <TreeRow depth={2} icon={<OpIcon kind={op.cls ?? op.kind} size={14} />} label={op.id} item={handle} selected={selected === handle} drag={drag} dropAt={dropAt}
-        meta={summary?.tool_number != null ? <span className={styles.metaText}>T{summary.tool_number}</span> : undefined}
+        meta={building === 'planning' ? <span className={styles.status} data-status="running" data-building="planning" title="camlib is planning it"><span className="spinner" />planning</span>
+          : building === 'done' ? <span className={styles.status} data-building="done" title="Planned in the build running now">planned</span>
+          : summary?.tool_number != null ? <span className={styles.metaText}>T{summary.tool_number}</span> : undefined}
         title={[
           op.cls ?? summary?.kind, tool ? `T${summary?.tool_number ?? '?'} ${tool.name}` : summary?.tool, summary?.spindle_rpm ? `S${num(summary.spindle_rpm, 0)}` : null,
           summary?.feed_mm_min ? `F${num(summary.feed_mm_min, 0)}` : null, stat ? `${num(stat.moves, 0)} moves · ${clock(stat.seconds)}` : null,
