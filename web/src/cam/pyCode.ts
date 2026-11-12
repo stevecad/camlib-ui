@@ -154,8 +154,10 @@ export function readProgram(outline: Outline): CamProgramModel | null {
 function opOf(outline: Outline, setup: string, element: Py, index: number): CamOp {
   let call = resolve(outline, element);
   if (call?.k === 'call' && base(call.f) === 'OperationNode') call = resolve(outline, argOf(call, 'operation', 0));
-  if (call?.k !== 'call' || !OP_CLASSES.has(base(call.f))) return { setup, index, element, call: null, cls: call?.k === 'call' ? base(call.f) : null, id: null };
-  const id = argOf(call, 'id', 0)?.v;
+  const id = call?.k === 'call' ? argOf(call, 'id', 0)?.v : undefined;
+  // An operation the forms have no form for (camlib's SuppliedToolpath, Deburr, …) keeps its own id (camlib's operations
+  // take it first), so the tree names it and shows its build figures; it is edited in code.
+  if (call?.k !== 'call' || !OP_CLASSES.has(base(call.f))) return { setup, index, element, call: null, cls: call?.k === 'call' ? base(call.f) : null, id: typeof id === 'string' ? id : null };
   return { setup, index, element, call, cls: base(call.f), id: typeof id === 'string' ? id : null };
 }
 

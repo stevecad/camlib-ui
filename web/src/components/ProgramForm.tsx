@@ -8,8 +8,8 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { AlertTriangle, ChevronRight, Code2, Crosshair, X } from 'lucide-react';
 import { OpIcon, SetupIcon } from '../icons';
-import { availableSpecs, fieldsOf, NESTED, OP_BY_CLASS, type FieldInfo, type Section as SectionKey } from '../cam/opSpecs';
-import { emptyNested, type Nested, type OpDraft, type SetupDraft } from '../cam/forms';
+import { availableSpecs, fieldsOf, nestedOf, notTaken, OP_BY_CLASS, type FieldInfo, type Section as SectionKey } from '../cam/opSpecs';
+import { changesInPlace, emptyNested, pointsSource, pointsText, type Nested, type OpDraft, type SetupDraft } from '../cam/forms';
 import {
   closeForm, commitForm, dialectOf, machinesOf, okProblem, openNewOp, presetsOf, setOpTool, showInCode, startPicking, toolSetupsOf, toolsOf, updateOp, updateSetup, useEditor,
   useShopRecords,
@@ -59,6 +59,13 @@ function Segmented({ value, options, onChange }: { value: string; options: { val
   );
 }
 
+/** A list of (x, y) points as typed; kept as typed while they aren't points yet (OK waits for them). */
+function PointsInput({ field, value, onChange }: { field: FieldInfo; value: string; onChange: (src: string) => void }) {
+  const [text, setText] = useState(() => pointsText(value));
+  return <input id={fieldId(field.key)} aria-label={field.label} placeholder="(x, y), (x, y), …" spellCheck={false} value={text}
+    onChange={(event) => { setText(event.target.value); onChange(pointsSource(event.target.value) ?? event.target.value); }} />;
+}
+
 /** One value as Python source: a number (or an expression the code has), Yes/No, a choice, text, a point. */
 function ValueInput({ field, value, onChange }: { field: FieldInfo; value: string; onChange: (src: string) => void }) {
   const placeholder = field.initial && field.initial !== 'None' ? `${unquote(field.initial)}` : field.required ? 'required' : 'off';
@@ -82,6 +89,7 @@ function ValueInput({ field, value, onChange }: { field: FieldInfo; value: strin
       </div>
     );
   }
+  if (field.kind === 'points') return <PointsInput field={field} value={value} onChange={onChange} />;
   const numeric = field.kind === 'number' || field.kind === 'integer';
   return <input id={fieldId(field.key)} aria-label={field.label} placeholder={placeholder} inputMode={numeric ? 'decimal' : undefined} spellCheck={false}
     value={field.kind === 'text' ? unquote(value) : value} onChange={(event) => { const text = event.target.value; onChange(field.kind === 'text' && text.trim() ? JSON.stringify(text) : text.trim()); }} />;
@@ -89,23 +97,31 @@ function ValueInput({ field, value, onChange }: { field: FieldInfo; value: strin
 
 const label = (field: FieldInfo) => `${field.label}${field.unit ? ` (${field.unit})` : ''}${field.required ? ' *' : ''}`;
 const badValue = (field: FieldInfo, value: string) => (field.kind === 'number' || field.kind === 'integer') && !!value && !/^-?[\d.]+(e-?\d+)?$/i.test(value) && !/[a-z_(]/i.test(value);
+/**
+ * A field the chosen path doesn't take (opSpecs notTaken): not shown while empty; one that holds a value is shown marked,
+ * with why, so it can be cleared (camlib refuses the program otherwise, and says so).
+ */
+const refusedNote = (why: string) => `${why}: camlib refuses this value. Clear it.`;
 
 /** An option object (an entry, the clearing, tabs, fine boring): its kind, then its own values. */
-function NestedField({ field, nested, onChange }: { field: FieldInfo; nested: Nested | undefined; onChange: (next: Nested | undefined) => void }) {
-  const choice = NESTED[field.key];
+function NestedField({ field, owner, nested, onChange }: { field: FieldInfo; owner: string; nested: Nested | undefined; onChange: (next: Nested | undefined) => void }) {
+  const choice = nestedOf(owner, field.key)!;
+  // What this operation takes; a class the code already holds stays listed (camlib says so if it refuses it).
+  const classes = nested?.cls && !choice.classes.includes(nested.cls) ? [...choice.classes, nested.cls] : choice.classes;
   const options = [...(field.required ? [] : [{ value: DEFAULT, label: field.initial && field.initial !== 'None' ? 'Default' : choice.none ?? 'None' }]), ...(choice.none && !field.required && field.initial !== 'None' ? [{ value: 'None', label: choice.none }] : []),
-    ...choice.classes.map((cls) => ({ value: cls, label: choice.label(cls) }))];
+    ...classes.map((cls) => ({ value: cls, label: choice.classes.includes(cls) ? choice.label(cls) : `${choice.label(cls)} (set in code)` }))];
   const value = nested === undefined ? DEFAULT : nested.cls ?? 'None';
+  const unused = notTaken(nested?.cls, nested?.values ?? {});
   return (
     <>
       <Row label={label(field)} field={field.key}>
         <Select ariaLabel={field.label} id={fieldId(field.key)} value={field.required && !nested ? '' : value} options={field.required && !nested ? [{ value: '', label: 'Choose…' }, ...options] : options}
           onChange={(next) => onChange(next === DEFAULT ? undefined : next === 'None' ? emptyNested(null) : emptyNested(next))} />
       </Row>
-      {nested?.cls && fieldsOf(nested.cls).map((inner) => (inner.kind === 'nested'
-        ? <NestedField key={inner.key} field={inner} nested={nested.nested[inner.key]} onChange={(next) => { const all = { ...nested.nested }; if (next) all[inner.key] = next; else delete all[inner.key]; onChange({ ...nested, nested: all }); }} />
+      {nested?.cls && fieldsOf(nested.cls).filter((inner) => !unused.has(inner.key) || (nested.values[inner.key] ?? '').trim()).map((inner) => (inner.kind === 'nested'
+        ? <NestedField key={inner.key} field={inner} owner={nested.cls!} nested={nested.nested[inner.key]} onChange={(next) => { const all = { ...nested.nested }; if (next) all[inner.key] = next; else delete all[inner.key]; onChange({ ...nested, nested: all }); }} />
         : (
-          <Row key={inner.key} label={`· ${label(inner)}`} field={`${field.key}.${inner.key}`}>
+          <Row key={inner.key} label={`· ${label(inner)}`} field={`${field.key}.${inner.key}`} error={unused.has(inner.key)} sub={unused.has(inner.key) ? refusedNote(unused.get(inner.key)!) : inner.help}>
             <ValueInput field={inner} value={nested.values[inner.key] ?? ''} onChange={(src) => onChange({ ...nested, values: { ...nested.values, [inner.key]: src } })} />
           </Row>
         )))}
@@ -122,7 +138,7 @@ function GeometryField({ field, draft }: { field: FieldInfo; draft: OpDraft }) {
   }
   const active = picking === field.key;
   const prompt = { region: 'Click flat faces of the part', holes: 'Click hole walls, in order', paths: 'Click edges (or a flat face for its outline)', path: 'Click a chain of edges', point: '', surface: '' }[kind];
-  const shown = geometry?.names?.length ? geometry.names.join(', ') : geometry?.points ? geometry.points.map(([x, y]) => `(${x}, ${y})`).join(' ') : geometry?.src ?? '';
+  const shown = geometry?.names?.length ? geometry.names.join(', ') : geometry?.points ? geometry.points.map(([x, y]) => `(${x}, ${y})`).join(' ') : geometry?.shown ?? geometry?.src ?? '';
   const empty = !shown;
   const clear = () => updateOp((d) => { const all = { ...d.geometry }; delete all[field.key]; return { ...d, geometry: all }; });
   return (
@@ -150,6 +166,7 @@ function OpForm({ draft, tooling, workOffset }: { draft: OpDraft; tooling: strin
   const presets = presetsOf(tool?.cutterKey ?? null);
   const set = (key: string) => (src: string) => updateOp((d) => ({ ...d, values: { ...d.values, [key]: src } }));
   const takesFeed = fields.some((field) => field.key === 'feed_mm_min');
+  const unused = notTaken(draft.cls, draft.values);
   return (
     <>
       <p className="form-note">{spec.about}</p>
@@ -165,7 +182,7 @@ function OpForm({ draft, tooling, workOffset }: { draft: OpDraft; tooling: strin
         {shopError && <p className="form-hint" data-tone="warn">The shop couldn’t be read: {shopError}</p>}
       </div>
       {SECTIONS.map(([section, title, open]) => {
-        const mine = fields.filter((field) => field.section === section);
+        const mine = fields.filter((field) => field.section === section && (!unused.has(field.key) || (draft.values[field.key] ?? '').trim()));
         if (!mine.length) return null;
         return (
           <Section key={section} title={title} defaultOpen={open || mine.some((field) => field.required)} id={`form-section-${section}`}>
@@ -184,9 +201,10 @@ function OpForm({ draft, tooling, workOffset }: { draft: OpDraft; tooling: strin
               </p>
             )}
             {mine.map((field) => (field.kind === 'geometry' ? <GeometryField key={field.key} field={field} draft={draft} />
-              : field.kind === 'nested' ? <NestedField key={field.key} field={field} nested={draft.nested[field.key]} onChange={(next) => updateOp((d) => { const nested = { ...d.nested }; if (next) nested[field.key] = next; else delete nested[field.key]; return { ...d, nested }; })} />
+              : field.kind === 'nested' ? <NestedField key={field.key} field={field} owner={draft.cls} nested={draft.nested[field.key]} onChange={(next) => updateOp((d) => { const nested = { ...d.nested }; if (next) nested[field.key] = next; else delete nested[field.key]; return { ...d, nested }; })} />
                 : (
-                  <Row key={field.key} label={label(field)} field={field.key} error={badValue(field, draft.values[field.key] ?? '')} sub={field.help}>
+                  <Row key={field.key} label={label(field)} field={field.key} error={unused.has(field.key) || badValue(field, draft.values[field.key] ?? '')}
+                    sub={unused.has(field.key) ? refusedNote(unused.get(field.key)!) : field.help}>
                     <ValueInput field={field} value={draft.values[field.key] ?? ''} onChange={set(field.key)} />
                   </Row>
                 )))}
@@ -277,9 +295,10 @@ function SetupForm({ draft, isNew }: { draft: SetupDraft; isNew: boolean }) {
         <Row label="Highest length register *" field="max_length_register"><input id={fieldId('max_length_register')} aria-label="Highest length register" inputMode="numeric" value={draft.premises.max_length_register ?? ''} onChange={(event) => premise('max_length_register')(event.target.value.trim())} /></Row>
         <Row label="At a tool change *" field="tool_change_position_mode">
           <Select ariaLabel="At a tool change" id={fieldId('tool_change_position_mode')} value={draft.premises.tool_change_position_mode ?? ''} onChange={premise('tool_change_position_mode')}
-            options={[{ value: '', label: 'Choose…' }, { value: '"preserve_tip"', label: 'The tip returns where it was' },
-              ...(draft.premises.tool_change_position_mode && draft.premises.tool_change_position_mode !== '"preserve_tip"' ? [{ value: draft.premises.tool_change_position_mode, label: `${unquote(draft.premises.tool_change_position_mode)} (set in code)` }] : [])]} />
+            options={[{ value: '', label: 'Choose…' }, { value: '"preserve_tip"', label: 'The tip returns where it was' }, { value: '"preserve_spindle"', label: 'In place: the spindle stays where it was' },
+              ...(draft.premises.tool_change_position_mode && !['"preserve_tip"', '"preserve_spindle"'].includes(draft.premises.tool_change_position_mode) ? [{ value: draft.premises.tool_change_position_mode, label: `${unquote(draft.premises.tool_change_position_mode)} (set in code)` }] : [])]} />
         </Row>
+        {changesInPlace(draft) && <p className="form-note">No axis moves at a tool change: the new tool’s tip is the old one’s, moved along Z by the difference of their gauge lengths. The setup is planned that way (tool_change=ToolChangeInPlace()).</p>}
         <Row label="Arcs in the G-code" field="lowering" sub="On a control of few decimals some arcs can’t be written exactly">
           <Select ariaLabel="Arcs in the G-code" id={fieldId('lowering')} value={draft.premises.lowering ?? ''} onChange={premise('lowering')}
             options={[{ value: '', label: 'The post’s own way' }, { value: 'LoweringOptions(native_arcs=True)', label: 'Arcs where exact, else checked lines' }, { value: 'LoweringOptions()', label: 'Checked lines only' },

@@ -1,5 +1,5 @@
-"""Shared fixtures: a projects root with the examples, the API's test client, and builds of the plate example (each a
-real camlib build in its own process, so they are made once per session)."""
+"""Shared fixtures: a projects root with the examples, the API's test client, and builds of the plate and cover examples
+(each a real camlib build in its own process, so they are made once per session)."""
 from __future__ import annotations
 
 import time
@@ -49,3 +49,16 @@ def client(root) -> TestClient:
 def plate(client) -> dict:
     """The plate example, built in full."""
     return build(client, "plate")
+
+
+@pytest.fixture(scope="session")
+def cover(client) -> dict:
+    """The cover example, built in full."""
+    return build(client, "cover")
+
+
+def variant(client: TestClient, name: str, example: str, change, mode: str = "full") -> dict:
+    """A project made from an example with its program.py changed, built."""
+    assert client.post("/api/projects", json={"name": name, "example": example}).status_code == 200
+    edit(client, name, "program.py", change)
+    return build(client, name, mode)

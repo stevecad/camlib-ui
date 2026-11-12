@@ -37,7 +37,10 @@ export interface Motion {
   arcs?: { curve: Uint8Array; center: Float32Array; sweep: Float32Array; plane: Uint8Array };
   /** Moves not read yet (1). Absent: all are. */
   pending?: Uint8Array;
-  /** Moves that start somewhere other than the previous endpoint (none in a camlib stream; kept for the model). */
+  /**
+   * Moves that start somewhere other than the previous endpoint: after a tool change that leaves the new tool's tip
+   * elsewhere (in place: moved by the difference of the gauge lengths). There is no move between the two points.
+   */
   restarts: Map<number, [number, number, number]>;
 }
 

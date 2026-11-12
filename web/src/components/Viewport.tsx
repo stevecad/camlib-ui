@@ -312,6 +312,9 @@ function toolpathLines(motion: Motion) {
   };
   for (let i = 0; i < motion.count; i++) {
     const x = motion.end[i * 3], y = motion.end[i * 3 + 1], z = motion.end[i * 3 + 2];
+    // A move that starts elsewhere (after a tool change): nothing is drawn from the previous end to its start.
+    const restart = motion.restarts.get(i);
+    if (restart) { px = restart[0]; py = restart[1]; pz = restart[2]; }
     const sweep = motion.arcs?.curve[i] ? Math.abs(motion.arcs.sweep[i]) : 0;
     if (!sweep) { segment(i, x, y, z, 0); continue; }
     const start: [number, number, number] = [px, py, pz];

@@ -13,9 +13,10 @@ import {
 
 /**
  * Geometry picked on the part (face or edge names), typed points, or the code it was read from, unchanged (`src`).
- * `keep`: a helper call's own keywords (`name="pocket"`), written again when the picks change.
+ * `keep`: a helper call's own keywords (`name="pocket"`), written again when the picks change. `shown`: what the code
+ * is, for the form to show, when it isn't picked faces or edges (the call a variable holds).
  */
-export interface Geometry { names?: string[]; points?: [number, number][]; whole?: boolean; src?: string; keep?: string[] }
+export interface Geometry { names?: string[]; points?: [number, number][]; whole?: boolean; src?: string; keep?: string[]; shown?: string }
 export interface Nested { cls: string | null; values: Record<string, string>; nested: Record<string, Nested> }
 export interface OpDraft {
   cls: string;
@@ -75,7 +76,10 @@ function readGeometry(model: CamProgramModel, value: Py, kind: GeometryKind): Ge
   const src = value.src;
   if (kind === 'region') {
     const read = helperCall(call, 'region', model.part);
-    return read ? { ...read, src } : null;
+    if (read) return { ...read, src };
+    // The part's outline at a depth, silhouette(part, z, max_error_mm=...): kept as its code (picking faces replaces it).
+    const outline = call.k === 'call' && base(call.f) === 'silhouette' && call.a?.[0]?.k === 'name' && call.a[0].name === model.part;
+    return outline ? { src, shown: call.src } : null;
   }
   if (kind === 'surface') {
     const read = helperCall(call, 'surface', model.part);
@@ -150,6 +154,33 @@ export function missingOf(draft: OpDraft): string[] {
     if (!(draft.values[field.key] ?? '').trim()) out.push(field.label);
   }
   for (const [key, nested] of Object.entries(draft.nested)) out.push(...missingNested(nested, fieldsOf(draft.cls).find((f) => f.key === key)?.label ?? key));
+  return out;
+}
+
+// A list of (x, y) points (tabs at positions) as the form shows it: the points, without the brackets around them.
+const NUMBER = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`;
+const POINT = String.raw`\(\s*${NUMBER}\s*,\s*${NUMBER}\s*\)`;
+const POINT_LIST = new RegExp(String.raw`^\s*${POINT}(?:\s*,\s*${POINT})*\s*,?\s*$`);
+
+/** Typed points, `(10, 0), (90, 0)`, as Python source (a tuple of them); null when they aren't (x, y) points of numbers. */
+export const pointsSource = (text: string): string | null => (!text.trim() ? '' : POINT_LIST.test(text) ? `(${text.trim().replace(/,$/, '')},)` : null);
+/** A point list's source as the form shows it: without its outer brackets (anything else, a name or an expression, as it is). */
+export function pointsText(src: string): string {
+  const inner = /^\s*[([]([\s\S]*)[)\]]\s*$/.exec(src)?.[1];
+  return inner !== undefined && POINT_LIST.test(inner) ? inner.trim().replace(/,$/, '') : src;
+}
+/** Whether a point list's source is one: literal (x, y) points, or code the program already had (a name, an expression). */
+const pointsOk = (src: string) => !src.trim() || pointsText(src) !== src || /^[A-Za-z_][\w.]*$/.test(src.trim());
+
+/** Values a form holds that camlib couldn't read: point lists that aren't (x, y) points (labels, for the OK button). */
+export function invalidOf(draft: OpDraft): string[] {
+  const out: string[] = [];
+  const check = (cls: string, values: Record<string, string>, prefix: string) => {
+    for (const field of fieldsOf(cls)) if (field.kind === 'points' && !pointsOk(values[field.key] ?? '')) out.push(`${prefix}${field.label}`);
+  };
+  check(draft.cls, draft.values, '');
+  const nested = (item: Nested, label: string) => { if (item.cls) { check(item.cls, item.values, `${label}: `); Object.values(item.nested).forEach((inner) => nested(inner, label)); } };
+  for (const [key, item] of Object.entries(draft.nested)) nested(item, fieldsOf(draft.cls).find((f) => f.key === key)?.label ?? key);
   return out;
 }
 
@@ -379,10 +410,20 @@ function machineText(draft: SetupDraft, model: Pick<CamProgramModel, 'shop'>, va
   return formatCall('machine', parts, column);
 }
 
+/**
+ * A tool change that moves no axis (the machine's tool_change_position_mode "preserve_spindle": the spindle stays, the
+ * tip moves by the difference of the gauge lengths) is planned with Setup(tool_change=ToolChangeInPlace()); camlib
+ * refuses the pair when only one of them says so.
+ */
+const IN_PLACE = 'ToolChangeInPlace()';
+export const changesInPlace = (draft: SetupDraft) => (draft.premises.tool_change_position_mode ?? '').replace(/'/g, '"').trim() === '"preserve_spindle"';
+const setupParts = (draft: SetupDraft, ops: string, checks: string | null) => [pyString(draft.id.trim()), stockText(draft), '()', ops, `(${draft.start.join(', ')})`,
+  ...(checks ? [`verification=${checks}`] : []), ...(changesInPlace(draft) ? [`tool_change=${IN_PLACE}`] : [])];
+
 /** What a setup's code imports. */
 function setupImports(draft: SetupDraft, checks: boolean): Record<string, string[]> {
   return {
-    camlib: ['Job', 'Setup', 'StockSpec'],
+    camlib: ['Job', 'Setup', 'StockSpec', ...(changesInPlace(draft) ? ['ToolChangeInPlace'] : [])],
     'camlib.motion': /\bWorkFrame\(/.test(draft.premises.work_to_machine ?? '') ? ['WorkFrame'] : [],
     'camlib.post': /\bLoweringOptions\(/.test(draft.premises.lowering ?? '') ? ['LoweringOptions'] : [],
     'camlib.verification': checks ? [...(draft.stockContact || draft.material ? ['StreamChecks'] : []), ...(draft.stockContact ? ['StockContactOptions'] : []), ...(draft.material ? ['MaterialCheck'] : [])] : [],
@@ -411,7 +452,7 @@ export function newProgramCode(name: string, draft: SetupDraft, part: boolean): 
   const imports = setupImports(draft, true);
   const checks = checksText(draft, 'part');
   const head = `${variable} = `;
-  const setup = formatCall('Setup', [pyString(draft.id), stockText(draft), '()', ops, `(${draft.start.join(', ')})`, ...(checks ? [`verification=${checks}`] : [])], head.length);
+  const setup = formatCall('Setup', setupParts(draft, ops, checks), head.length);
   const machineCall = machineText(draft, { shop: 'shop' }, variable, 'program = Program(job, {'.length + pyString(draft.id).length + 2);
   const jobId = name.replace(/[^A-Za-z0-9_.:-]+/g, '_').slice(0, 64) || 'program';
   const lines = [
@@ -462,6 +503,13 @@ export function writeSetup(code: string, model: CamProgramModel, draft: SetupDra
         if (edit) edits.push(edit);
       }
     }
+    // The setup's own tool change follows the machine's: in place with "preserve_spindle"; one the form wrote is taken
+    // out again with another mode (any other tool_change the code has stays as it is).
+    const change = argOf(setup.call, 'tool_change', 9);
+    if (machineChanged && changesInPlace(draft) !== (change?.src.replace(/\s+/g, '') === IN_PLACE) && (changesInPlace(draft) || change)) {
+      const edit = setKeyword(setup.call, 'tool_change', changesInPlace(draft) ? IN_PLACE : null, 9);
+      if (edit) edits.push(edit);
+    }
     if (setup.machine && machineChanged) {
       const keep = (setup.machine.kw ?? []).filter((kw) => !kw.key || !['tooling', 'work_offset', ...PREMISES].includes(kw.key)).map((kw) => code.slice(kw.s[0], kw.s[1]));
       const extra = (setup.machine.a ?? []).slice(2).map((item) => item.src);
@@ -491,7 +539,7 @@ export function writeSetup(code: string, model: CamProgramModel, draft: SetupDra
   const ops = freeName(model.outline, `${variable}_ops`, [variable]);
   const checks = checksText(draft, model.part);
   const head = `${variable} = `;
-  const text = formatCall('Setup', [pyString(draft.id.trim()), stockText(draft), '()', ops, `(${draft.start.join(', ')})`, ...(checks ? [`verification=${checks}`] : [])], head.length);
+  const text = formatCall('Setup', setupParts(draft, ops, checks), head.length);
   const before = statementAt(model.outline, model.job.s[0]);
   const at = before?.s[0] ?? model.job.s[0];
   edits.push({ at: [at, at], text: `${ops} = ()\n${head}${text}\n` });

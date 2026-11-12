@@ -35,6 +35,11 @@ export interface StreamStock { min_mm: number[]; max_mm: number[]; nx: number; n
 export interface StreamSetup {
   id: string; machine: string; controller: string; post: string; initial_position_mm: number[]; stock: StreamStock;
   tools: StreamTool[]; operations: StreamOperation[]; moves: number; seconds: number; chunks: ChunkEntry[];
+  /**
+   * Moves that start somewhere other than the previous move's end, [move, x, y, z] in move order: a tool change that
+   * leaves the new tool's tip elsewhere (docs/playback-stream.md). Absent in older streams: none.
+   */
+  restarts?: number[][];
 }
 export interface StreamHeader {
   format: string; version: number; units: string; camlib?: { version?: string; commit?: string };
@@ -77,6 +82,9 @@ export function parseHeader(bytes: Uint8Array): StreamHeader {
   for (const setup of header.setups) {
     const stock = setup.stock;
     need(stock && Number.isInteger(stock.nx) && Number.isInteger(stock.ny) && stock.nx * stock.ny > 0, 'Setup stock grid missing.');
+    setup.restarts ??= [];
+    need(Array.isArray(setup.restarts) && setup.restarts.every((item, index) => Array.isArray(item) && item.length === 4 && Number.isInteger(item[0]) && item[0] >= 0 && item[0] < setup.moves
+      && item.slice(1).every((value) => Number.isFinite(value)) && (index === 0 || item[0] > setup.restarts![index - 1][0])), 'Bad restarts.');
     let first = 0;
     for (const chunk of setup.chunks ?? []) {
       need(chunk.first_move === first, 'Chunks aren\'t contiguous.');

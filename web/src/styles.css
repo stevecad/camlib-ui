@@ -250,6 +250,14 @@ input:focus, select:focus { outline: none; border-color: var(--amber); }
 .spec { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; color: var(--text-3); font-size: 12px; }
 .spec b { color: var(--text-1); font-weight: 600; }
 .meta { margin: 0; color: var(--text-4); font-size: 11px; }
+.spec span[data-tone='warn'] { color: var(--text-2); }
+.op-report > summary b { color: var(--text-1); }
+.op-report .figures { margin-left: 12px; }
+.report-rows { margin-top: 4px; font-size: 11.5px; color: var(--text-3); max-height: 320px; overflow: auto; }
+.report-row { display: flex; gap: 8px; justify-content: space-between; align-items: baseline; padding: 1px 0; }
+.report-row b { color: var(--text-1); font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+.report-row[data-heading] span { color: var(--text-2); font-weight: 600; }
+.report-row[data-tone='warn'] b { color: var(--text-2); font-weight: 400; text-align: left; }
 .traceback, .log { margin: 0; padding: 10px; border-radius: var(--r-md); background: var(--code-bg); border: 1px solid var(--line-2); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text-2); max-height: 480px; overflow: auto; }
 .traceback { border-color: rgb(255 132 116 / 0.3); }
 .trace-link { border: none; background: none; padding: 0; color: var(--info); text-decoration: underline; cursor: pointer; font: inherit; }

@@ -149,6 +149,11 @@ def check(data: bytes) -> dict:
         stock = setup.get("stock") or {}
         _need(isinstance(stock.get("nx"), int) and isinstance(stock.get("ny"), int) and stock["nx"] * stock["ny"] > 0,
               "Setup stock grid missing.")
+        restarts = setup.get("restarts") or []   # absent in a stream written before restarts: none
+        _need(isinstance(restarts, list) and all(
+            isinstance(r, list) and len(r) == 4 and isinstance(r[0], int) and not isinstance(r[0], bool)
+            and 0 <= r[0] < setup.get("moves", 0) and all(isinstance(v, (int, float)) and math.isfinite(v) for v in r[1:])
+            for r in restarts) and [r[0] for r in restarts] == sorted({r[0] for r in restarts}), "Bad restarts.")
         first, keyframes = 0, 0
         for chunk in setup.get("chunks") or []:
             _need(chunk.get("first_move") == first, "Chunks aren't contiguous.")
@@ -158,5 +163,6 @@ def check(data: bytes) -> dict:
             reader.moves(setup, chunk)
             first += chunk["moves"]
         _need(first == setup.get("moves"), "Setup move count doesn't match its chunks.")
-        summary.append(dict(id=setup.get("id"), moves=first, chunks=len(setup.get("chunks") or []), keyframes=keyframes))
+        summary.append(dict(id=setup.get("id"), moves=first, chunks=len(setup.get("chunks") or []), keyframes=keyframes,
+                            restarts=len(restarts)))
     return dict(setups=summary)

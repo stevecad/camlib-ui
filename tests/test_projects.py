@@ -14,10 +14,11 @@ def projects(tmp_path):
 
 
 def test_seed_copies_the_examples(projects):
-    assert example_names() == ["plate"]
-    assert [p["name"] for p in projects.list()] == ["plate"]
-    plate = projects.describe("plate")
-    assert (plate["part"], plate["shop"], plate["program"]) == ("part.py", "shop.py", "program.py")
+    assert example_names() == ["cover", "plate"]
+    assert [p["name"] for p in projects.list()] == ["cover", "plate"]
+    for name in ("cover", "plate"):
+        example = projects.describe(name)
+        assert (example["part"], example["shop"], example["program"]) == ("part.py", "shop.py", "program.py")
 
 
 def test_seed_leaves_a_root_with_projects_alone(tmp_path):

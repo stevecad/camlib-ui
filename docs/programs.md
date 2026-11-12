@@ -9,7 +9,8 @@ A camlib-ui project is a folder with three kinds of file:
 | `program.py` | The program: a camlib `Job`, and the machine each setup is posted for, as `program = Program(...)`. |
 
 Anything else in the folder (helper modules, fixture bodies such as the example's `vise.py`) can be imported or
-referenced by these. The `plate` example (`camlib_ui/examples/plate/`) is a complete project; start from it.
+referenced by these. The `plate` example (`camlib_ui/examples/plate/`) is a complete project; start from it. The
+`cover` example beside it shows an adaptive pocket on camlib's default planner, a ramp entry and tabs at points.
 
 ## The part
 
@@ -66,7 +67,13 @@ code says, and edits them through forms (from STEVE Studio's CAM forms):
   the installed camlib, and every field camlib requires (no default) is required in the form too: speeds, feeds and
   coolant are never assumed. Geometry is picked on the part: flat faces facing along Z (`region`), hole walls
   (`hole_centers`, or typed points), flat edges or a flat face's outline (`paths`, `path`). Tools come from the setup's
-  tool setup, filtered to the cutters that fit.
+  tool setup, filtered to the cutters that fit. Option objects have their own rows: an entry (plunge, helix, from
+  outside the stock, or a ramp along the path with its angle: a pocket takes any, a contour a ramp or a plunge), tabs
+  (a count, a spacing, or **At points**: typed `(x, y), (x, y), …` on the part's outline; a loop without a point gets no
+  tab, and camlib's report lists such loops), a trace's cutter position (on the path, or beside it to the left or
+  right). An adaptive pocket's **Path** is camlib's own choice of planner: *Follow the stock* (camlib's default) or
+  *Orbits*; fields the chosen path refuses (orbit radii on *Follow the stock*) aren't shown, and one the code already
+  sets is marked so it can be cleared.
 - **Edit** (double-click, F2), **duplicate** (Ctrl+D), **move** (drag, or Move up / down), **delete** (Delete, with
   Undo).
 
@@ -99,6 +106,7 @@ program = Program(Job("plate", "1", (setup,)),
 | `solid(part)` | The part as a CadQuery shape (what `camlib.cadquery` takes). |
 | `face(part, name)`, `faces(part, name)` | The face(s) a name selects. |
 | `region(part, *names, name=)` | Flat faces facing along Z as one camlib `PlanarRegion` (a pocket's floor, an outline). |
+| `silhouette(part, z_mm, max_error_mm=, name=)` | The part's outline at a depth (the shadow of everything at or above it) as a `PlanarRegion`, from its mesh: camlib's `Engine.silhouette_region`, for a `Contour` around the whole part. A form shows it as the code it is. |
 | `hole_centers(part, *names)` | The (x, y) centres of holes, from their walls: what `Drilling` and friends take. |
 | `surface(part)` | The part's surface as camlib's `SurfaceMesh` (roughing targets, 3D finishing). |
 | `paths(part, *names)`, `path(part, *names)` | Flat edges chained into camlib `TracePath`s. |
@@ -114,6 +122,15 @@ program = Program(Job("plate", "1", (setup,)),
 coordinates: the work offset's values), and the controller's premises (`flood`, `mist`, `planes`, `arcs`, `helices`,
 `max_sweep_rad`, `max_tool_number`, `max_length_register`, `tool_change_position_mode`, …). A missing one is refused
 by camlib with its name.
+
+The machine's travel comes from the shop: it is the spindle gauge line's, so camlib checks every move against its own
+tool's travel (that box lowered by the tool's gauge length); a finding names the tool and the limit.
+
+`tool_change_position_mode` says where a tool change leaves the tip. `"preserve_tip"`: where it was. With
+`"preserve_spindle"` no axis moves (a manual change, or a changer that comes to the spindle), so the new tip is the old
+one moved along Z by the difference of the gauge lengths, and the setup is planned that way:
+`Setup(..., tool_change=ToolChangeInPlace())`. The setup form writes both together; camlib refuses one without the
+other. The playback starts the next move where the change left the tip, with nothing drawn in between.
 
 `Program(..., accept={...})` releases G-code despite findings of those kinds, on purpose: `"uncertain"`,
 `"violation"` or `"unchecked_machine"` (the shop declares no machine crash model). By default nothing is accepted,
@@ -133,5 +150,16 @@ A build's result has, per setup and machine: the G-code (when released), camlib'
 to see it in the playback), what wasn't checked, the moves, time and stock figures, and the playback stream
 (`docs/playback-stream.md`). Builds are kept in the project's `.builds/` folder (the last 20).
 
-camlib-ui builds 3-axis milling programs. Controller posts other than LinuxCNC come from a camlib checkout's
-`examples/` folder (`--camlib-posts`).
+Under them, **Operations** lists each operation as camlib planned it: its moves, lengths and time, and camlib's own
+report, unchanged. What to read first is said in words (an adaptive clearing's proven engagement against its limit,
+strokes in confined material that are cut as entry moves outside that limit, wall passes, a waterline's shadow error,
+camlib's diagnostics, such as a contour's loops left without a tab); the whole report follows, every value under
+camlib's own name. A report longer than 256 kB is cut, and says where.
+
+camlib refuses what it can't do exactly (an orbit radius on the planner that follows the stock, a tab point off the
+outline, a ramp with tabs): the build then shows camlib's own message, which names the value and what to change.
+
+camlib-ui builds 3-axis milling programs. An operation the forms have no form for (camlib's `SuppliedToolpath`, whose
+moves the program gives; `Deburr`; probing) is written in the code: it is built, checked, reported and played back like
+any other, and opens in the code editor. Turning isn't built here: `machine(...)` refuses a lathe control. Controller
+posts other than LinuxCNC come from a camlib checkout's `examples/` folder (`--camlib-posts`).

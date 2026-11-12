@@ -38,7 +38,9 @@ export function streamMotion(stream: PlaybackStream, s: number): StreamMotion {
   const header = stream.header, setup = header.setups[s];
   const count = setup.moves;
   const motion: Motion = {
-    first: 0, count, start: [setup.initial_position_mm[0], setup.initial_position_mm[1], setup.initial_position_mm[2]], restarts: new Map(),
+    first: 0, count, start: [setup.initial_position_mm[0], setup.initial_position_mm[1], setup.initial_position_mm[2]],
+    // Where a tool change leaves the new tool's tip, when that isn't where the last move ended.
+    restarts: new Map((setup.restarts ?? []).map(([move, x, y, z]) => [move, [x, y, z]])),
     end: new Float32Array(count * 3), kind: new Uint8Array(count), operation: new Uint32Array(count).fill(UNASSIGNED), tool: new Uint32Array(count),
     rpm: new Float32Array(count), feed: new Float32Array(count), line: new Uint32Array(count),
     arcs: { curve: new Uint8Array(count), center: new Float32Array(count * 3), sweep: new Float32Array(count), plane: new Uint8Array(count) },

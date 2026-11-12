@@ -10,7 +10,7 @@ import { findDefinition, revealIn, startBuild, toast, useApp } from '../state';
 import { fieldsLoaded, OP_BY_CLASS, setFields, type CamlibField, type CutterType, type GeometryKind, fieldNames } from './opSpecs';
 import { freeOpId, readProgram, type CamOp, type CamProgramModel, type Outline } from './pyCode';
 import {
-  deleteOp, duplicateOp, FormError, missingOf, newOp, newProgramCode, readOp, readSetup, reorderOps, setupContext, writeOp, writeSetup, type Geometry, type OpDraft, type SetupDraft,
+  deleteOp, duplicateOp, FormError, invalidOf, missingOf, newOp, newProgramCode, readOp, readSetup, reorderOps, setupContext, writeOp, writeSetup, type Geometry, type OpDraft, type SetupDraft,
 } from './forms';
 
 const PROGRAM = 'program.py';
@@ -395,7 +395,12 @@ export function updateSetup(change: (draft: SetupDraft) => SetupDraft) {
 export function okProblem(form: ProgramForm | null): string | null {
   if (!form) return null;
   if (form.mode === 'first') return 'Choose the setup’s first operation.';
-  if (form.mode === 'op') { const missing = missingOf(form.draft); return missing.length ? `Needed: ${missing.join(', ')}.` : null; }
+  if (form.mode === 'op') {
+    const missing = missingOf(form.draft);
+    if (missing.length) return `Needed: ${missing.join(', ')}.`;
+    const invalid = invalidOf(form.draft);
+    return invalid.length ? `${invalid.join(', ')}: (x, y) points, like (10, 0), (90, 0).` : null;
+  }
   const d = form.draft;
   if (!d.machine || !d.tooling) return 'Pick the machine and its tool setup.';
   if (d.material && !useApp.getState().project?.part) return 'Checking the stock against the part needs a part file.';

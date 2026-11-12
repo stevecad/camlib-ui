@@ -10,6 +10,11 @@ Layout (little-endian):
     H      header, UTF-8 JSON
     ...    body: zlib streams (RFC 1950) at the offsets the header gives, relative to the body's start
 
+A move starts where the one before it ended, except where a tool change leaves the new tool's tip elsewhere (a change in
+place moves the tip by the difference of the gauge lengths; a change that goes to a position leaves it there): each
+such move is listed in its setup's header as a restart, [move, x, y, z], the point it starts at. Nothing is drawn or cut
+between the previous move's end and a restart: camlib models no move there.
+
 Each setup's moves are cut into chunks of at most CHUNK_MOVES moves, each compressed on its own. A chunk may start with
 a keyframe (the whole stock grid as it is before the chunk's first move); one is written at the first chunk of a setup
 and whenever the stock changes since the last keyframe add up to more bytes than a keyframe. Seeking to move n: the
@@ -61,6 +66,9 @@ class SetupStream:
         self.since_keyframe = math.inf
         self.chunks, self.pending, self.pending_bytes = [], [], 0
         self.moves, self.seconds = 0, 0.0
+        # Where the tip is (the last move's end); a move that starts elsewhere is a restart (module docstring).
+        self.tip = tuple(self.meta["initial_position_mm"])
+        self.restarts = []
         self.chunk_first, self.chunk_start_s, self.chunk_keyframe = 0, 0.0, None
 
     def add(self, motion, changes, count, duration_s, line):
@@ -69,6 +77,10 @@ class SetupStream:
             self._start_chunk()
         curve = motion["curve"]
         shape = curve.get("kind", "line")
+        start = tuple(float(v) for v in curve["start"])
+        if start != self.tip:
+            self.restarts.append([self.moves, *start])
+        self.tip = tuple(float(v) for v in curve["end"])
         record = [MOVE.pack(KINDS.index(motion["kind"]) if motion.get("kind") in KINDS else KINDS.index("other"),
                             CURVES.index(shape) if shape in CURVES else 0,
                             self.operation_index.get(motion.get("operation"), NO_INDEX),
@@ -118,7 +130,7 @@ class SetupStream:
         stock = dict(min_mm=list(self.min_mm), max_mm=list(self.max_mm), nx=self.nx, ny=self.ny,
                      cell_mm=[(self.max_mm[0] - self.min_mm[0]) / self.nx, (self.max_mm[1] - self.min_mm[1]) / self.ny])
         return dict(self.meta, stock=stock, tools=self.tools, operations=self.operations, moves=self.moves,
-                    seconds=round(self.seconds, 6), chunks=self.chunks)
+                    seconds=round(self.seconds, 6), restarts=self.restarts, chunks=self.chunks)
 
 
 def write(path, setups, body_path, *, camlib):

@@ -5,7 +5,8 @@
  * click away in the editor.
  */
 import { AlertTriangle, CheckCircle2, CircleDashed, CircleHelp, Download, Play, XCircle } from 'lucide-react';
-import type { Build, MachineResult, MaterialReport } from '../api';
+import type { Build, MachineResult, MaterialReport, OperationStats } from '../api';
+import { reportHeadlines, reportRows } from '../cam/report';
 import { openPlayer, revealIn, seekMove, showBuild, useApp, usePlayer } from '../state';
 import { findingDetail, findingMove, findingWords, severityOf, verdictOf, words } from '../cam/playback';
 import { clock } from './Player';
@@ -129,6 +130,41 @@ function MachineVerdict({ build, setup, machine, several }: { build: Build; setu
   );
 }
 
+/**
+ * A setup's operations as camlib planned them: each one's moves, lengths and time, then camlib's own report of it. What
+ * is worth reading first is said in words (the engagement an adaptive clearing proved, its diagnostics); the whole
+ * report follows, every value under camlib's own name, whatever its shape.
+ */
+function Operations({ setup, operations, several }: { setup: string; operations: OperationStats[]; several: boolean }) {
+  return (
+    <div className="card" id={`operations-${setup}`} data-setup={setup}>
+      <div className="card-head"><b>Operations</b>{several ? ` of ${setup}` : ''} <span className="meta">as camlib planned them</span></div>
+      {operations.map((op) => {
+        const headlines = reportHeadlines(op.report);
+        const rows = op.report ? reportRows(op.report) : [];
+        return (
+          <details key={op.id} className="figures op-report" data-operation={op.id}>
+            <summary><b>{op.id}</b> · {num(op.moves, 0)} moves · {clock(op.seconds)} · cut {num(op.cut_mm, 0)} mm · rapid {num(op.rapid_mm, 0)} mm</summary>
+            {headlines.length > 0 && <div className="spec">{headlines.map((line, index) => <span key={index} data-tone={line.tone}>{line.text}</span>)}</div>}
+            {rows.length > 0 ? (
+              <details className="figures">
+                <summary>camlib’s report ({rows.length} values)</summary>
+                <div className="report-rows">
+                  {rows.map((row, index) => (
+                    <div key={index} className="report-row" data-heading={row.value === null || undefined} data-tone={row.tone} style={{ paddingLeft: row.depth * 12 }}>
+                      <span>{row.label}</span>{row.value !== null && <b>{row.value}</b>}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ) : <p className="note">{op.report === undefined ? 'This build kept no report of it (build again).' : 'camlib gave no report of it.'}</p>}
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
 function Status({ build }: { build: Build }) {
   if (build.status === 'queued' || build.status === 'running') {
     return <div className="banner" data-tone="info"><span className="spinner" /><span><b>{build.status === 'queued' ? 'Waiting to build' : build.mode === 'full' ? 'Building' : 'Checking'}…</b> {build.mode === 'full' ? 'camlib plans every setup, checks every move, posts and decides what to release.' : 'Running the program and describing it.'}</span></div>;
@@ -158,6 +194,7 @@ export default function ResultPanel() {
       {build && <Status build={build} />}
       {build?.program_error && <Traceback text={build.program_error} />}
       {build && pairs.map(({ setup, machine }) => <MachineVerdict key={`${setup}:${machine.machine}`} build={build} setup={setup} machine={machine} several={pairs.length > 1} />)}
+      {(metadata?.setups ?? []).filter((setup) => setup.operations?.length).map((setup) => <Operations key={setup.id} setup={setup.id} operations={setup.operations} several={(metadata?.setups?.length ?? 0) > 1} />)}
       {(metadata?.warnings?.length ?? 0) > 0 && (
         <div className="card">
           <div className="card-head"><AlertTriangle size={13} /> Warnings</div>

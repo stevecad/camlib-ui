@@ -31,7 +31,7 @@ import importlib.util
 import math
 import re
 
-__all__ = ["solid", "face", "faces", "part_target", "region", "hole_centers", "surface", "paths", "path", "tool", "slot",
+__all__ = ["solid", "face", "faces", "part_target", "region", "silhouette", "hole_centers", "surface", "paths", "path", "tool", "slot",
            "head", "cutting", "fixture", "protected", "machine", "Program", "Target", "POSTS"]
 
 _ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
@@ -125,6 +125,25 @@ def region(link, *names, name=None, max_error_mm=0.005):
         return regions[0]
     return PlanarRegion(_label(name or "+".join(names)), tuple(c for r in regions for c in r.components),
                         max(r.boundary_error_mm for r in regions), source)
+
+
+def silhouette(link, z_mm, *, max_error_mm, surface_error_mm=0.001, name=None):
+    """The linked part's outline at a depth as a camlib PlanarRegion, for a Contour around the whole part at that floor
+    (camlib's Engine.silhouette_region, docs/operations.md "A mesh part's outline"): the plan-view shadow of everything
+    of the part at or above `z_mm`, from its surface mesh (tessellated within `surface_error_mm`). At or below the
+    part's lowest point it is the whole part's outline. The region is conservative and states its own error
+    (boundary_error_mm: the mesh's error and a small reserve), which operations add to their clearance; camlib refuses a
+    silhouette whose error is over `max_error_mm` (no default: say what the outline may be off by), or a depth with
+    nothing at or above it. Its edges are straight, as fine as the mesh."""
+    import camlib
+    from camlib.planar import PlanarRegion
+    mesh = surface(link, max_error_mm=surface_error_mm)
+    with camlib.Engine() as engine:
+        found = engine.silhouette_region(mesh, z_mm, max_error_mm=max_error_mm)
+    region = PlanarRegion.from_dict(found["region"])
+    if name is None:
+        return region
+    return PlanarRegion(_label(name), region.components, region.boundary_error_mm, region.source)
 
 
 def hole_centers(link, *names):

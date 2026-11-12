@@ -42,7 +42,7 @@ H       header             UTF-8 JSON
                "holders": [{"z_min_mm": 45, "z_max_mm": 75, "radius_min_mm": 17.5, "radius_max_mm": 17.5}]}],
     "operations": [{"id": "face", "kind": "facing", "tool": "t_em10", "tool_number": 1, "length_register": 1,
                     "spindle_rpm": 9000, "feed_mm_min": 1200}],
-    "moves": 318, "seconds": 555.74,
+    "moves": 318, "seconds": 555.74, "restarts": [],
     "chunks": [{"first_move": 0, "moves": 318, "offset": 265, "length": 9876, "raw_length": 123456,
                 "start_s": 0.0, "keyframe": {"offset": 0, "length": 265}}]
   }]
@@ -80,8 +80,12 @@ A chunk is up to 1024 moves, compressed together. Decompressed, it is the moves 
 | changed | u32 | how many stock cells the move changes |
 | changes | changed × (u32, f32, f32) | each cell's index and its new lower and upper heights |
 
-A move starts where the previous one ended (the first at `initial_position_mm`). A helix moves along its plane's
-normal from its start to its end while it turns.
+A move starts where the previous one ended (the first at `initial_position_mm`), unless the setup's header lists it in
+`restarts`: `[[move, x, y, z], …]`, in move order, each the point that move (0-based) starts at instead. A tool change
+makes one when it leaves the new tool's tip somewhere else: a change in place moves the tip along Z by the difference
+of the two gauge lengths, a change that goes to a position leaves the tip there. camlib models no move between the
+previous end and a restart, so a viewer draws and cuts nothing there. A stream without `restarts` has none. A helix
+moves along its plane's normal from its start to its end while it turns.
 
 ## Keyframes
 

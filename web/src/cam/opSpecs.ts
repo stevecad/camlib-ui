@@ -65,14 +65,35 @@ export const OP_SPECS: OpSpec[] = [
 
 export const OP_BY_CLASS: Record<string, OpSpec> = Object.fromEntries(OP_SPECS.map((spec) => [spec.cls, spec]));
 
-/** Option objects an operation's field may hold, by field name. */
-export const NESTED: Record<string, { classes: string[]; label: (cls: string) => string; none?: string }> = {
-  entry: { classes: ['HelicalEntry', 'StockEdgeEntry'], label: (cls) => (cls === 'HelicalEntry' ? 'Helix' : 'From outside the stock'), none: 'Plunge' },
+export interface NestedChoice { classes: string[]; label: (cls: string) => string; none?: string }
+const ENTRY_LABELS: Record<string, string> = { HelicalEntry: 'Helix', StockEdgeEntry: 'From outside the stock', RampEntry: 'Ramp along the path' };
+const entryLabel = (cls: string) => ENTRY_LABELS[cls] ?? cls;
+const POCKET_ENTRIES = ['HelicalEntry', 'StockEdgeEntry'];
+
+/** Option objects an operation's field may hold, by field name (what a form reads: every class the field can hold). */
+export const NESTED: Record<string, NestedChoice> = {
+  entry: { classes: [...POCKET_ENTRIES, 'RampEntry'], label: entryLabel, none: 'Plunge' },
+  side_offset: { classes: ['TraceSideOffset'], label: () => 'Beside the path (cutter radius)', none: 'On the path' },
   clearing: { classes: ['RasterClearing', 'OffsetClearing', 'AdaptiveClearing'], label: (cls) => ({ RasterClearing: 'Raster', OffsetClearing: 'Offset', AdaptiveClearing: 'Adaptive' })[cls] ?? cls },
   tabs: { classes: ['Tabs'], label: () => 'Tabs', none: 'No tabs' },
   fine_bore: { classes: ['FineBore'], label: () => 'Fine bore', none: 'Off' },
   helix: { classes: ['HelicalEntry'], label: () => 'Helix', none: 'Outside the stock only' },
 };
+
+/**
+ * The classes one operation's field offers, where camlib takes fewer than the field can hold elsewhere (it refuses the
+ * others, naming them): a contour's entry is a ramp around its loop or a plunge (camlib Contour); adaptive pockets, rest
+ * pockets and roughing fit a helix or enter from outside the stock, never a ramp (camlib RampEntry).
+ */
+const NESTED_FOR: Record<string, NestedChoice> = {
+  'Contour.entry': { classes: ['RampEntry'], label: entryLabel, none: 'Plunge' },
+  'AdaptivePocket.entry': { classes: POCKET_ENTRIES, label: entryLabel, none: 'Plunge' },
+  'RestPocket.entry': { classes: POCKET_ENTRIES, label: entryLabel, none: 'Plunge' },
+  'Roughing.entry': { classes: POCKET_ENTRIES, label: entryLabel, none: 'Plunge' },
+  'RestRoughing.entry': { classes: POCKET_ENTRIES, label: entryLabel, none: 'Plunge' },
+};
+/** What a field of `cls` offers (an operation's or an option object's class); undefined: not an option object. */
+export const nestedOf = (cls: string | null | undefined, key: string): NestedChoice | undefined => NESTED_FOR[`${cls}.${key}`] ?? NESTED[key];
 
 export type Section = 'geometry' | 'heights' | 'passes' | 'cutting' | 'options' | 'advanced';
 
@@ -109,7 +130,8 @@ export const FIELD_VIEW: Record<string, FieldView> = {
   // Passes
   stepdown_mm: v('Stepdown', 'passes', MM), stepover_mm: v('Stepover', 'passes', MM), radial_stepover_mm: v('Radial stepover', 'passes', MM),
   radial_allowance_mm: v('Stock on walls', 'passes', MM), bottom_allowance_mm: v('Stock on floor', 'passes', MM), stock_to_leave_mm: v('Stock to leave', 'passes', MM),
-  axis: v('Direction', 'passes', undefined, undefined, [['x', 'Along X'], ['y', 'Along Y']]), mode: v('Pattern', 'passes', undefined, undefined, [['zigzag', 'Zigzag'], ['one_way', 'One way']]),
+  axis: v('Direction', 'passes', undefined, undefined, [['x', 'Along X'], ['y', 'Along Y']]),
+  one_way: v('One way', 'passes', undefined, 'Every row cut in the same direction (a rapid link back at the retract height) instead of zigzag.'), mode: v('Pattern', 'passes', undefined, undefined, [['zigzag', 'Zigzag'], ['one_way', 'One way']]),
   reverse: v('Reverse', 'passes'), cutting_sense: v('Milling', 'passes', undefined, undefined, SENSE), clockwise: v('Clockwise', 'passes'), outward: v('Outward', 'passes'),
   width_step_mm: v('Width per pass', 'passes', MM), angular_step_deg: v('Angle between spokes', 'passes', DEG), start_angle_deg: v('First spoke', 'passes', DEG),
   inner_radius_mm: v('Inner radius', 'passes', MM), outer_radius_mm: v('Outer radius', 'passes', MM), alternate: v('Alternate directions', 'passes'),
@@ -122,9 +144,14 @@ export const FIELD_VIEW: Record<string, FieldView> = {
   depth_reference: v('Depth is at', 'passes', undefined, undefined, [['tip', 'Tip'], ['full_diameter', 'Full diameter']]), allow_breakthrough_mm: v('Break through by', 'passes', MM),
   // Cutting data
   spindle_rpm: v('Spindle speed', 'cutting', 'rpm'), feed_mm_min: v('Feed', 'cutting', FEED), plunge_mm_min: v('Plunge feed', 'cutting', FEED),
-  retract_feed_mm_min: v('Retract feed', 'cutting', FEED), entry_feed_mm_min: v('Entry feed', 'cutting', FEED),
+  retract_feed_mm_min: v('Retract feed', 'cutting', FEED), entry_feed_mm_min: v('Entry feed', 'cutting', FEED), link_feed_mm_min: v('Link feed', 'cutting', FEED),
   coolant: v('Coolant', 'cutting', undefined, undefined, [['flood', 'Flood'], ['mist', 'Mist'], ['off', 'Off']]),
   // Options
+  side_offset: v('Cutter position', 'options', undefined, 'Beside the path: a flat end mill runs its radius to one side of each open path.'),
+  side: v('Side', 'options', undefined, 'Of the direction of travel.', [['left', 'Left'], ['right', 'Right']]),
+  positions_mm: v('At points', 'options', MM, 'Tabs at these (x, y) points on the part’s outline instead of a count or spacing. A loop without a point gets no tab.'),
+  position_tolerance_mm: v('Point tolerance', 'options', MM, 'How far a point may be from the outline.'),
+  min_length_mm: v('Shortest ramp span', 'options', MM, 'The shortest stretch a ramp may reverse on (a pocket’s short pass).'),
   entry: v('Entry', 'options'), clearing: v('Clearing', 'options'), tabs: v('Tabs', 'options'), fine_bore: v('Fine boring', 'options'), helix: v('Helix', 'options'),
   lead_in_mm: v('Lead in', 'options', MM), lead_out_mm: v('Lead out', 'options', MM), compensation: v('Compensation', 'options', undefined, 'Wear: posted with G41/G42 (needs both leads).', [['computer', 'In the program'], ['wear', 'Wear (G41/G42)']]),
   entry_air_gap_mm: v('Entry air gap', 'options', MM), edge_overlap_mm: v('Edge overlap', 'options', MM), tip_clearance_mm: v('Tip clearance', 'options', MM),
@@ -135,7 +162,8 @@ export const FIELD_VIEW: Record<string, FieldView> = {
   angle_deg: v('Ramp angle', 'options', DEG), radius_mm: v('Radius', 'options', MM), height_mm: v('Height', 'options', MM), count: v('Count', 'options'),
   spacing_mm: v('Spacing', 'options', MM), shape: v('Shape', 'options', undefined, undefined, [['triangle', 'Triangle'], ['rectangle', 'Rectangle']]),
   shift_mm: v('Shift', 'options', MM), edge_angle_deg: v('Edge angle', 'options', DEG), routing: v('Routing', 'options'), coverage_margin_mm: v('Coverage margin', 'options', MM),
-  path_strategy: v('Path', 'options', undefined, undefined, [['disk_front', 'Disk front'], ['stock_front', 'Stock front']]),
+  path_strategy: v('Path', 'options', undefined, 'Follow the stock: passes along the edge of the uncut material, engagement proven. Orbits: the earlier planner.',
+    [['engagement_front', 'Follow the stock'], ['disk_front', 'Orbits'], ['stock_front', 'Stock front (development)']]),
   // Advanced
   tolerance_mm: v('Tolerance', 'advanced', MM), boundary_tolerance_mm: v('Boundary tolerance', 'advanced', MM), path_error_mm: v('Path error', 'advanced', MM),
   contour_error_mm: v('Contour error', 'advanced', MM), safety_margin_mm: v('Safety margin', 'advanced', MM), level_tolerance_mm: v('Level tolerance', 'advanced', MM),
@@ -146,7 +174,9 @@ export const FIELD_VIEW: Record<string, FieldView> = {
 /** Fields a form never shows: written from the tool and the setup (slot() and the setup's work offset). */
 export const HIDDEN = new Set(['id', 'tool', 'tool_number', 'length_register', 'work_offset']);
 
-export type Kind = 'number' | 'integer' | 'bool' | 'choice' | 'text' | 'point' | 'geometry' | 'nested';
+export type Kind = 'number' | 'integer' | 'bool' | 'choice' | 'text' | 'point' | 'points' | 'geometry' | 'nested';
+/** Fields holding a list of (x, y) points. */
+const POINT_LISTS = new Set(['positions_mm']);
 
 export interface FieldInfo extends FieldView {
   key: string;
@@ -174,6 +204,7 @@ const kindOf = (name: string, type: string, geometry: GeometryKind | undefined):
   if (geometry === 'point') return 'point';
   if (geometry) return 'geometry';
   if (NESTED[name]) return 'nested';
+  if (POINT_LISTS.has(name)) return 'points';
   if (type.startsWith('float')) return 'number';
   if (type.startsWith('int')) return 'integer';
   if (type.startsWith('bool')) return 'bool';
@@ -194,3 +225,35 @@ export function fieldsOf(cls: string): FieldInfo[] {
 
 /** The class's field names in camlib's order (positional arguments map onto them). */
 export const fieldNames = (cls: string): string[] => (FIELDS[cls] ?? []).map(([name]) => name);
+
+// ── What a planner doesn't take ──────────────────────────────────────────
+
+const unquoted = (src: string) => src.trim().replace(/^["']|["']$/g, '');
+const ORBITS = ['orbit_radius_mm', 'min_orbit_radius_mm', 'local_orbit_tolerance_mm'];
+/**
+ * Per class with a `path_strategy` and per strategy: the fields camlib refuses when they are set (its own rules:
+ * camlib's AdaptivePocket and AdaptiveClearing, src/pocket_front.rs and src/adaptive.rs), and why.
+ */
+const NOT_TAKEN: Record<string, Record<string, [fields: string[], why: string][]>> = {
+  AdaptivePocket: {
+    engagement_front: [[ORBITS, 'Following the stock uses no orbits'], [['max_stay_down_mm', 'rest_tolerance_mm'], 'Following the stock links through its own proven-clear moves and plans from the stock as cut']],
+    disk_front: [[['cutting_sense'], 'Orbits take their direction from Clockwise'], [['max_stay_down_mm'], 'An adaptive pocket relinks through its own re-entries']],
+    stock_front: [[['max_stay_down_mm'], 'An adaptive pocket relinks through its own re-entries']],
+  },
+  AdaptiveClearing: { engagement_front: [[ORBITS, 'Following the stock uses no orbits']] },
+};
+
+/**
+ * The fields of `cls` its chosen path doesn't take, with why: camlib refuses the program when one is set, so a form
+ * hides them while empty and marks one that holds a value. The path is the form's value, else camlib's own default
+ * (from the installed camlib, so an older camlib's default planner keeps its fields).
+ */
+export function notTaken(cls: string | null | undefined, values: Record<string, string>): Map<string, string> {
+  const out = new Map<string, string>();
+  const rules = cls ? NOT_TAKEN[cls] : undefined;
+  if (!rules) return out;
+  const initial = (FIELDS[cls!] ?? []).find(([name]) => name === 'path_strategy')?.[2];
+  const strategy = unquoted(values.path_strategy || initial || '');
+  for (const [fields, why] of rules[strategy] ?? []) for (const field of fields) out.set(field, why);
+  return out;
+}

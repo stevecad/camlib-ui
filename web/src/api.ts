@@ -29,7 +29,8 @@ export interface OperationSummary {
 }
 export interface SceneBody { id: string; role: 'fixture' | 'protected_target'; z_min_mm: number; z_max_mm: number; outlines: number[][][] }
 export interface Scene {
-  travel_mm: number[][]; tip_travel_mm: number[][]; work_to_machine: { origin_mm: number[]; x: number[]; y: number[]; z: number[] };
+  /** The spindle gauge line's travel (machine coordinates), and each tool's own tip travel: that box lowered by its gauge length. */
+  travel_mm: number[][]; tool_tip_travel_mm?: Record<string, number[][]>; work_to_machine: { origin_mm: number[]; x: number[]; y: number[]; z: number[] };
   fixtures: string[]; protected: string[]; bodies: SceneBody[];
 }
 export interface MachineDescription { machine: string; controller: string; post: string; units: string; decimals: number; from_shop: string[]; scene: Scene }
@@ -55,7 +56,8 @@ export interface MachineResult {
   findings: Finding[]; finding_counts: Record<string, number>; findings_listed: number; unchecked: string[];
   checks?: { progress?: Record<string, number>; coverage?: Record<string, unknown> } | null; material?: MaterialReport | null; scene: Scene;
 }
-export interface OperationStats { id: string; moves: number; cut_mm: number; rapid_mm: number; seconds: number }
+/** One operation as posted: its moves and time, and camlib's own planning report as it gave it (any shape; null: none). */
+export interface OperationStats { id: string; moves: number; cut_mm: number; rapid_mm: number; seconds: number; report?: Record<string, unknown> | null }
 export interface Metadata {
   kind: 'camlib'; camlib: { version: string; commit: string | null; posts: string | null }; program: ProgramDescription;
   warnings: { severity: string; kind: string; message: string }[]; timings_ms?: Record<string, number>;

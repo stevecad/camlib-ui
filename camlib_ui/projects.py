@@ -24,7 +24,8 @@ HIDDEN = ".builds"
 BLANK_PROGRAM = '''"""A new camlib program. `from links import part, shop`: the project's part file and shop.py.
 
 camlib's API: https://github.com/stevecad/camlib (docs/). camlib-ui's helpers (camlib_ui.program): solid, face, region,
-hole_centers, surface, paths, part_target, tool, slot, fixture, protected, machine, Program. See the plate example.
+silhouette, hole_centers, surface, paths, part_target, tool, slot, fixture, protected, machine, Program. See the plate
+and cover examples.
 """
 from links import shop  # noqa: F401  (add `part` once the project has a part file)
 from camlib import Job, Setup, StockSpec  # noqa: F401

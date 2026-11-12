@@ -14,8 +14,9 @@ only), and for every setup and machine plans, simulates, checks every move, post
 it on the stock (camlib's `Job.post`), then lets camlib's `export` release the G-code or refuse it. It writes, in a
 directory of its own, then moves into the build's directory:
 
-  - result.json: per setup and operation the moves, cut and rapid length and nominal time; camlib's findings with their
-    severity; per setup and machine the G-code's file, or why camlib refused it;
+  - result.json: per setup and operation the moves, cut and rapid length, nominal time and camlib's own planning report
+    (as camlib gave it: the engagement an adaptive clearing proved, a contour's loops left without a tab, ...);
+    camlib's findings with their severity; per setup and machine the G-code's file, or why camlib refused it;
   - gcode-<n>.nc: each setup's posted program per machine, as camlib's export wrote it;
   - cam-playback.bin: every move of the decoded posted program with the stock it removes (docs/playback-stream.md).
 
@@ -51,6 +52,8 @@ CONFIG_KEYS = {"stock", "tools", "operations", "initial_position_mm", "sweep", "
 MAX_BODIES = 256           # fixture and protected bodies per machine scene
 BODY_KEYS = {"id", "role", "footprint", "z_min_mm", "z_max_mm", "z_error_mm"}
 NO_FIXTURES = "fixtures (no fixtures declared)"   # unchecked: the travel was checked, no fixture was
+MAX_REPORT_BYTES = 256 * 1024   # an operation's planning report in result.json (a longer one is cut, and says where)
+REPORT_CUT = "…"                # the key (or list item) that says what was cut from a report
 
 
 class ProgramFailed(Exception):
@@ -249,36 +252,39 @@ def _scene_data(value):
 
 def scene_of(setup, target):
     """The setup's verification on this machine: the program's own checks (stock contact, material) and camlib's Scene
-    for its travel and bodies. camlib checks the tool tip against one travel box per scene, while a mill's travel limits
-    its spindle's gauge line, which sits each tool's gauge length above the tip: the box is the travel every tool of the
-    setup has (Z from the lowest gauge-line position less the shortest gauge length, to the highest less the longest).
-    A move outside its own tool's travel is always outside the box; with tools of different gauge lengths, a move inside
-    its tool's travel but outside another tool's is refused too (exact for one gauge length)."""
+    for its travel and bodies. A mill's travel limits its spindle's gauge line, which sits each tool's gauge length above
+    the tip, so the scene declares the gauge line's travel (camlib's MachineLimits.gauge_line) and camlib checks every
+    move against its own tool's travel: the gauge box lowered along machine Z by that tool's gauge length. A plasma or
+    laser head isn't held in a spindle (camlib refuses gauge-line travel for a beam): its one tool's tip travel is the
+    head's travel less its gauge length, which is exact for one tool."""
     import dataclasses
     import hashlib
     from camlib.verification import MachineLimits, Options, Scene
+    from camlib_ui.program import BEAM_PROCESSES, POSTS
     config = dict(setup.config.get("verification") or {})
     if config.get("scene"):
         raise ValueError(f"Setup {setup.id} configures its own camlib Scene: the machine's travel and fixtures come from "
                          "machine(..., work_to_machine=..., fixtures=...); leave scene out of StreamChecks.")
-    gauges = [t.get("gauge_length_mm") for t in setup.config["tools"]]
-    _need(all(_number(g, 0, 1e5) for g in gauges), "tool gauge lengths")
+    gauges = {t["id"]: t.get("gauge_length_mm") for t in setup.config["tools"]}
+    _need(all(_number(g, 0, 1e5) for g in gauges.values()), "tool gauge lengths")
     (low, high), bodies = target.scene["travel_mm"], target.scene["bodies"]
-    tip_low, tip_high = (low[0], low[1], low[2] - min(gauges)), (high[0], high[1], high[2] - max(gauges))
-    if tip_low[2] >= tip_high[2]:
-        raise ValueError(f"Setup {setup.id} on {target.key}: the machine's Z travel ({low[2]}..{high[2]} mm) is shorter "
-                         f"than the spread of the setup's tool gauge lengths ({min(gauges)}..{max(gauges)} mm); no tip "
-                         "position is within every tool's travel.")
     machine = target.machine
-    limits = MachineLimits(tip_low, tip_high, machine.max_feed_mm_min, machine.max_normal_accel_mm_s2,
-                           machine.max_axis_feed_mm_min)
+    feeds = (machine.max_feed_mm_min, machine.max_normal_accel_mm_s2, machine.max_axis_feed_mm_min)
+    # Each tool's own tip travel (for the result: what camlib checks its moves against).
+    tips = {tool: [[low[0], low[1], low[2] - gauge], [high[0], high[1], high[2] - gauge]] for tool, gauge in gauges.items()}
+    if POSTS[target.post].process in BEAM_PROCESSES:
+        _need(len(gauges) == 1, "a cutting head's setup has one tool")
+        (tip_low, tip_high), = tips.values()
+        limits = MachineLimits(tuple(tip_low), tuple(tip_high), *feeds)
+    else:
+        limits = MachineLimits.gauge_line(tuple(low), tuple(high), *feeds)
     content = dict(bodies=[b.to_dict() for b in bodies], machine=limits.to_dict(),
                    frame=dataclasses.asdict(machine.work_to_machine))
     revision = hashlib.sha256(json.dumps(content, sort_keys=True, allow_nan=False).encode()).hexdigest()[:32]
     scene = Scene(setup.id, revision, bodies, limits, machine.work_to_machine)
     config["scene"] = dict(scene=scene.to_dict(), options=dataclasses.asdict(Options()))
     config.setdefault("material", [])
-    summary = dict(travel_mm=[list(low), list(high)], tip_travel_mm=[list(tip_low), list(tip_high)],
+    summary = dict(travel_mm=[list(low), list(high)], tool_tip_travel_mm=tips,
                    work_to_machine=dataclasses.asdict(machine.work_to_machine),
                    fixtures=[b.id for b in bodies if b.role == "fixture"],
                    protected=[b.id for b in bodies if b.role == "protected_target"],
@@ -377,6 +383,39 @@ def _finding(entry, material):
     return dict(move=entry.get("completed"), severity=entry.get("status"), details=details)
 
 
+def bounded_report(report, limit=MAX_REPORT_BYTES):
+    """An operation's planning report as camlib gave it, for result.json: unchanged when it fits `limit` bytes of JSON,
+    else with its long lists and texts cut shorter until it does. Whatever is cut is said in place, never dropped
+    silently: a cut list ends with {"…": "<n> more of <total> not listed"}, a cut text with "… (<n> more characters)",
+    and values nested too deep are {"…": "not listed (nested too deep)"}."""
+    def cut(value, items, text, depth):
+        if isinstance(value, dict):
+            if depth > 12:
+                return {REPORT_CUT: "not listed (nested too deep)"}
+            return {str(k)[:200]: cut(v, items, text, depth + 1) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            if depth > 12:
+                return [{REPORT_CUT: "not listed (nested too deep)"}]
+            kept = [cut(v, items, text, depth + 1) for v in value[:items]]
+            if len(value) > items:
+                kept.append({REPORT_CUT: f"{len(value) - items} more of {len(value)} not listed"})
+            return kept
+        if isinstance(value, str) and len(value) > text:
+            return f"{value[:text]}… ({len(value) - text} more characters)"
+        if isinstance(value, float) and not math.isfinite(value):
+            return str(value)
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        return str(value)[:text]
+    if not isinstance(report, dict):
+        return None
+    for items, text in ((10**9, 10**9), (256, 4000), (64, 2000), (16, 1000), (4, 400), (1, 100)):
+        shaped = cut(report, items, text, 0)
+        if len(json.dumps(shaped, allow_nan=False, default=str)) <= limit:
+            return shaped
+    return {REPORT_CUT: f"the report is over {limit} bytes even cut short: not listed"}
+
+
 class Clock:
     def __init__(self, started, timeout):
         self.deadline = started + timeout - 15   # time left to write the result and send the files
@@ -392,8 +431,13 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
     from camlib.simulation import checked_length, stock_state
     clock_start = time.monotonic()
     verification, scene = scene_of(setup, target)
+    # camlib's own report of each operation as it planned it (the last one it gave: an operation's end carries the
+    # whole plan's figures), kept as given for the result. Called while the run is read; a list append only.
+    reports = {}
     options = dict(machine=target.machine, post=target.post_class, decoder=target.decoder_class,
-                   verification=verification)
+                   verification=verification,
+                   on_operation=lambda update: reports.__setitem__(update.operation, update.report)
+                   if isinstance(update.report, dict) else None)
     if target.lowering is not None:
         options["lowering"] = target.lowering
     run = job.post(setup.id, **options)
@@ -472,6 +516,7 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
         for item in operations.values():
             for key in ("cut_mm", "rapid_mm", "seconds"):
                 item[key] = round(item[key], 3)
+            item["report"] = bounded_report(reports.get(item["id"]))
         return result, [operations[op] for op in order] + [v for k, v in operations.items() if k not in order], writer
 
 

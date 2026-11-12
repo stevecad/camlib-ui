@@ -21,14 +21,20 @@ Python, build it, see what camlib planned, checked and released, play it back on
   Right-click a setup to add any of camlib's 25 milling operations (face, pocket, contour, drill, bore, tap, parallel,
   waterline, …) through a form; double-click one to edit it; drag, Delete, F2 and Ctrl+D reorder, delete, edit and
   duplicate. Faces, hole walls and edges are picked on the part. Every field is camlib's own (from the installed
-  camlib), with no cutting data assumed. Each change writes exactly that code into `program.py`, and OK builds it.
+  camlib), with no cutting data assumed: an adaptive pocket's path (camlib's default follows the stock; the fields that
+  path refuses aren't offered), ramp, helix and stock-edge entries, tabs by count, spacing or at points, a trace beside
+  its path, one-way rows. Each change writes exactly that code into `program.py`, and OK builds it.
 - **Code editor** for every project file, with Python highlighting; <kbd>Ctrl</kbd>+<kbd>S</kbd> saves,
   <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves and builds, <kbd>Ctrl</kbd>+<kbd>P</kbd> goes to a file. A program's error
   links each traceback line to the file and line it names.
 - **Check** runs the program and describes it (setups, stock, tools, operations, machines). **Build** has camlib plan
   every setup, check every move, post, decode and replay the G-code, and release it or refuse it.
 - **The verdict** per setup and machine: released (download the G-code) or refused, with each finding a click away in
-  the playback, what wasn't checked, and the figures (moves, time, stock left, the material check).
+  the playback, what wasn't checked, and the figures (moves, time, stock left, the material check). Every tool is
+  checked against its own travel (the machine's, lowered by that tool's gauge length).
+- **camlib's report of each operation**, as camlib gave it: the engagement an adaptive clearing proved level by level
+  and its wall passes, ramp angles, a contour's loops left without a tab, a waterline's shadow error, and every other
+  value under camlib's own name.
 - **3D view** in work coordinates, navigated as in STEVE Studio (view cube, standard views, mouse styles of STEVE,
   SOLIDWORKS, Fusion and Onshape, the command palette on <kbd>Ctrl</kbd>+<kbd>K</kbd>, every shortcut on
   <kbd>?</kbd>): the part (click a face for its name), the stock as cut at any move, the toolpath coloured by move
@@ -67,7 +73,9 @@ cd web && npm ci && npm run build && cd ..
 ./start.sh
 ```
 
-Then open <http://127.0.0.1:8765>. An empty projects folder is given the `plate` example to start from.
+Then open <http://127.0.0.1:8765>. An empty projects folder is given the examples to start from: `plate` (face,
+pocket, outline and holes, in a vise) and `cover` (an adaptive pocket that follows the stock, a recess entered by a
+ramp, the outline cut through with tabs at points). A new project can start from either.
 
 `start.sh` checks that camlib-ui and camlib are installed, builds the interface if it isn't built yet, finds camlib's
 posts in `../camlib/examples` (the checkout from Install), and starts the server. `./start.sh --help` lists it all:
@@ -110,7 +118,7 @@ cd web && npm run typecheck && npm test
 | `camlib_ui/build/` | A build: stage 1 (the program) and stage 2 (camlib plans, checks, posts, releases). |
 | `camlib_ui/shop.py`, `program.py`, `parts.py` | The shop as code, the program helpers, part files. |
 | `camlib_ui/stream.py`, `build/stream.py` | The playback stream's reader and writer ([docs/playback-stream.md](docs/playback-stream.md)). |
-| `camlib_ui/examples/plate/` | The example project. |
+| `camlib_ui/examples/plate/`, `cover/` | The example projects. |
 | `web/src/` | The interface: React, three.js (react-three-fiber), CodeMirror. |
 
 ## License

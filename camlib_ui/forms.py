@@ -25,7 +25,8 @@ MAX_DEPTH = 40   # nesting the outline follows; deeper values are kept as code
 OPERATIONS = ("Facing", "Pocket", "RestPocket", "AdaptivePocket", "Roughing", "RestRoughing", "Contour", "Chamfer", "VCarve",
               "Trace", "TrochoidalSlot", "Drilling", "Bore", "Reaming", "Tapping", "ThreadMilling", "Parallel", "Waterline",
               "Flat", "Scallop", "Pencil", "Spiral", "Radial", "Project", "Morph")
-OPTIONS = ("HelicalEntry", "StockEdgeEntry", "RasterClearing", "OffsetClearing", "AdaptiveClearing", "Tabs", "FineBore")
+OPTIONS = ("HelicalEntry", "StockEdgeEntry", "RampEntry", "RasterClearing", "OffsetClearing", "AdaptiveClearing", "Tabs", "FineBore",
+           "TraceSideOffset")
 
 
 # ── Outline ────────────────────────────────────────────────────────────────
