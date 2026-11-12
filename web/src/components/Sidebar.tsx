@@ -22,6 +22,7 @@ import type { OperationSummary, SceneBody, SetupDescription } from '../api';
 import TreeRow, { type Entry, type Line, type TreeRowProps } from './TreeRow';
 import styles from '../shell/Browser.module.css';
 import dock from '../shell/Dock.module.css';
+import { usePanelWidth } from '../shell/panels';
 import { clock } from './Player';
 
 const I = { size: 15 };
@@ -384,8 +385,11 @@ function Browser() {
 
 /** The left panel (STEVE Studio's LeftPanel): the browser as its Model tab, Collapse all and Hide in the tab row. */
 export default function Sidebar() {
+  // Dragged at its right edge (shell/panels.ts).
+  const { width, edge } = usePanelWidth('left');
   return (
-    <nav className="sidebar" aria-label="Browser">
+    <nav className="sidebar" aria-label="Browser" style={{ width }}>
+      <div {...edge} />
       <div className={dock.dock}>
         <div className={dock.tabs} role="tablist" aria-label="Browser panels">
           <button type="button" role="tab" aria-selected data-tab="model" className={dock.tab} data-active="true">

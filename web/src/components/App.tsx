@@ -3,7 +3,7 @@
  * with its player and the posted G-code, and the code and result panel. Keys go through the command table
  * (commands.ts), as in STEVE Studio.
  */
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect } from 'react';
 import { AlertTriangle, Code2, FileCode, FolderPlus, Hammer, ListChecks, PanelRightClose, ScanSearch, Search, Square, X } from 'lucide-react';
 import { boot, cancelBuild, openProject, running, startBuild, useApp, usePlayer } from '../state';
 import { displayShortcut, handleShortcut } from '../commands';
@@ -15,6 +15,7 @@ import CodePanel from './CodePanel';
 import ResultPanel, { outcome } from './ResultPanel';
 import Dialogs, { Shortcut } from './Dialogs';
 import PanelRail from './PanelRail';
+import { usePanelWidth, useWindowWidth } from '../shell/panels';
 import Ribbon from './Ribbon';
 import ProgramForm from './ProgramForm';
 import { closeForm, startPicking, useEditor } from '../cam/programEditor';
@@ -55,31 +56,17 @@ function TopBar() {
   );
 }
 
-/** The right panel's width, dragged at its left edge (kept between visits). */
-function useWidth(key: string, initial: number): [number, (event: ReactPointerEvent) => void] {
-  const [width, setWidth] = useState(() => Number(localStorage.getItem(key)) || initial);
-  const drag = useRef<{ x: number; width: number } | null>(null);
-  useEffect(() => { localStorage.setItem(key, String(Math.round(width))); }, [key, width]);
-  const start = (event: ReactPointerEvent) => {
-    drag.current = { x: event.clientX, width };
-    const move = (e: PointerEvent) => { if (drag.current) setWidth(Math.min(window.innerWidth - 420, Math.max(320, drag.current.width + drag.current.x - e.clientX))); };
-    const up = () => { drag.current = null; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
-  return [width, start];
-}
-
 function RightPanel() {
   const tab = useApp((state) => state.tab);
   const build = useApp((state) => state.build);
   const form = useEditor((state) => !!state.form);
-  const [width, start] = useWidth('camlib-ui:dock-width', 384);
+  // Dragged at its left edge (shell/panels.ts).
+  const { width, edge } = usePanelWidth('right');
   // An operation's or setup's form takes the panel while it's open (as the studio's feature dialogs do).
   if (form) {
     return (
       <section className="right-panel" style={{ width }} id="right-panel">
-        <div className="resizer" onPointerDown={start} role="separator" aria-orientation="vertical" aria-label="Resize the panel" />
+        <div {...edge} />
         <ProgramForm />
       </section>
     );
@@ -92,7 +79,7 @@ function RightPanel() {
   ];
   return (
     <section className="right-panel" style={{ width }} id="right-panel">
-      <div className="resizer" onPointerDown={start} role="separator" aria-orientation="vertical" aria-label="Resize the panel" />
+      <div {...edge} />
       <div className={dock.tabs} role="tablist" aria-label="Inspector panels">
         {tabs.map((item) => {
           const Icon = item.icon;
@@ -156,6 +143,7 @@ export default function App() {
   const sidebarOpen = useApp((state) => state.sidebarOpen);
   const panelOpen = useApp((state) => state.panelOpen);
   useEffect(() => { void boot(); }, []);
+  useWindowWidth();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (escape(event)) { event.preventDefault(); return; }

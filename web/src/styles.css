@@ -49,8 +49,13 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   color: var(--text-2); background: var(--bg-4); border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: var(--r-xs); line-height: 1; }
 [hidden] { display: none !important; }
 
-.app { display: grid; grid-template-rows: var(--topbar-h) auto minmax(0, 1fr); height: 100%; }
-.body { display: flex; min-height: 0; }
+/* One column, exactly the window's width: minmax(0, 1fr), not the implicit `auto` column. An `auto` column is never
+   narrower than its widest row's content, and the body's content is the two side panels plus the 3D canvas at the pixel
+   width it was last given; a panel dragged wider then widened the column, and with it the top bar and the ribbon,
+   past the window, while the view never narrowed. The rows may not ask for more than the column either. */
+.app { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--topbar-h) auto minmax(0, 1fr); height: 100%; }
+.app > * { min-width: 0; }
+.body { display: flex; min-height: 0; overflow: hidden; }
 .spacer { flex: 1; }
 
 /* Controls. */
@@ -87,7 +92,8 @@ input:focus, select:focus { outline: none; border-color: var(--amber); }
 
 /* The left panel: STEVE Studio's side panel (App.module.css .sidePanel); its tabs and browser are shell/Dock.module.css
    and shell/Browser.module.css, as the studio has them. */
-.sidebar { width: 264px; flex: none; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg-1); border-right: 1px solid var(--line-2); }
+.sidebar { position: relative; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); border-right: 1px solid var(--line-2); }
+.sidebar > :not(.resizer) { min-width: 0; overflow: hidden; }
 .icon-button.small { width: 24px; height: 24px; }
 .dirty { font-style: normal; color: var(--amber); margin-left: 4px; font-size: 9px; }
 
@@ -108,8 +114,9 @@ input:focus, select:focus { outline: none; border-color: var(--amber); }
 .menu-sep { height: 1px; margin: 5px 4px; background: var(--line-2); }
 
 /* Center. */
-.center { position: relative; flex: 1; min-width: 0; display: flex; }
-.stage { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* The view takes what the panels leave and never more: its canvas is clipped, not allowed to hold the column open. */
+.center { position: relative; flex: 1 1 0; min-width: 0; display: flex; overflow: hidden; }
+.stage { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .viewport { position: relative; flex: 1; min-height: 0; background: linear-gradient(180deg, var(--vp-top), var(--vp-bottom)); }
 .viewport canvas { display: block; }
 .viewport-note, .player-note { position: absolute; left: 50%; top: 62px; transform: translateX(-50%); padding: 7px 12px; border-radius: var(--r-md); background: rgb(20 24 27 / 0.86); border: 1px solid var(--line-3); color: var(--text-2); box-shadow: var(--shadow-2); max-width: 80%; }
@@ -171,9 +178,13 @@ input:focus, select:focus { outline: none; border-color: var(--amber); }
 .gc-comment { color: var(--tok-cm); font-style: italic; }
 
 /* Right panel. */
-.right-panel { position: relative; flex: none; display: flex; flex-direction: column; background: var(--bg-1); border-left: 1px solid var(--line-2); min-width: 320px; }
-.resizer { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 5; }
-.resizer:hover { background: rgb(232 189 132 / 0.3); }
+.right-panel { position: relative; flex: none; display: flex; flex-direction: column; background: var(--bg-1); border-left: 1px solid var(--line-2); }
+.right-panel > :not(.resizer) { min-width: 0; }
+/* A side panel's edge with the view, dragged to resize it (shell/panels.ts keeps the width within its bounds). */
+.resizer { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 5; touch-action: none; }
+.resizer[data-side='right'] { left: -3px; }
+.resizer[data-side='left'] { right: -3px; }
+.resizer:hover, .resizer[data-dragging] { background: rgb(232 189 132 / 0.3); }
 .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .dot[data-tone='passed'] { background: var(--success); }
 .dot[data-tone='failed'] { background: var(--danger); }
