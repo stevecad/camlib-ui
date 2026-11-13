@@ -934,6 +934,18 @@ class Target:
     scene: dict = field(default_factory=dict)
 
 
+def camlib_version():
+    """The installed camlib's version, or None when it isn't installed as a package. camlib is published as
+    `cam-engine` (PyPI's `camlib` is another project) and was installed as `camlib` before that."""
+    from importlib.metadata import PackageNotFoundError, version
+    for name in ("cam-engine", "camlib"):
+        try:
+            return version(name)
+        except PackageNotFoundError:
+            continue
+    return None
+
+
 def posts_directory():
     """Where camlib's controller posts are: $CAMLIB_POSTS, a directory holding camlib's examples/*_post.py (camlib ships
     them as examples, not in its package; a camlib checkout's examples/ directory), or None."""

@@ -70,8 +70,7 @@ class ProgramFailed(Exception):
 
 def camlib_identity():
     """camlib's version, and the posts directory (with its git commit when it is a checkout)."""
-    from importlib.metadata import version
-    from camlib_ui.program import posts_directory
+    from camlib_ui.program import camlib_version, posts_directory
     directory = posts_directory()
     commit = None
     if directory is not None:
@@ -80,7 +79,7 @@ def camlib_identity():
                                     timeout=10).stdout.strip() or None
         except (OSError, subprocess.SubprocessError):
             commit = None
-    return dict(version=version("camlib"), commit=commit, posts=str(directory) if directory else None)
+    return dict(version=camlib_version() or "unknown", commit=commit, posts=str(directory) if directory else None)
 
 
 # ------------------------------------------------------------------------------------------------ stage 1: the program

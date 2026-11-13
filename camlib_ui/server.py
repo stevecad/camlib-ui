@@ -68,13 +68,8 @@ def create_app(root: Path, *, timeout: int = 900) -> FastAPI:
 
     @app.get("/api/info")
     def info():
-        from importlib.metadata import PackageNotFoundError, version
-
-        from .program import posts_directory
-        try:
-            camlib = version("camlib")
-        except PackageNotFoundError:
-            camlib = None
+        from .program import camlib_version, posts_directory
+        camlib = camlib_version()
         posts = posts_directory()
         return {"camlib": camlib, "posts": str(posts) if posts else None,
                 "posts_found": bool(posts and posts.is_dir() and any(posts.glob("*_post.py"))),
