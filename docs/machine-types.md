@@ -97,7 +97,10 @@ stock is the ordinary grid, so the playback shows camlib's own sheet with every 
 cutter to sweep, so the fine display stock isn't used for a sheet), and the stream's `lead` moves are drawn as leads.
 
 What a sheet project does not have yet is everything that would make it read as sheet work rather than as a flat
-milling job: a 2D view with the parts, pierces and marks, the nest's own figures, forms, and a torch drawn as one.
+milling job: a 2D view with the parts, pierces and marks, and the nest's own figures. The forms (P4) and the torch
+(P6) are there: `ThermalCut` and `ThermalMark` in the ribbon's Cutting group (`forms.ts` `readThermal`/`writeThermal`,
+`tests/test_cutting.py`), and `SheetView.tsx` (the torch inside the declared nozzle and body, the arc and sparks while
+a cut plays, a slat table for context).
 
 ### Missing, in order
 
@@ -106,9 +109,9 @@ milling job: a 2D view with the parts, pierces and marks, the nest's own figures
 | P1 | **there**: shop helpers and an example `sheet`: `MachineModel.table(travel=, head=CuttingHead.plasma(...))`, `CuttingRecipe(...)`; a nest of two parts, leads, small holes, QtPlasmaC; tests; docs | `shop.py` (helpers), `examples/sheet/`, `tests/test_cutting.py`, `docs/programs.md` | `playback.ts` `simPlan`: camlib's grid for a beam | done |
 | P2 | A **2D sheet view**: looking straight down by default for a sheet setup, the parts' outlines (kept) over the sheet, kerfs, lead-ins, pierce points marked, marks in their own colour | `build/run.py`: put the parts' regions, the nest's placements and camlib's report `order`/`pierces` into the setup's description; the stream needs a `mark` kind (camlib has it; `KINDS` maps it to "other" today) | `Viewport.tsx`: a `SheetView` (outlines as lines, pierce markers), the top view when the setup's tool is a beam; `motion.ts` `MOVE_KINDS` + a colour for `mark` | M |
 | P3 | **Nesting shown and editable**: the nest's utilisation, min distances proven by camlib's own check, unplaced parts; a form for `NestPart` quantities, rotations, spacing, margin | `forms.py`: fields of `Nest`, `NestPart`; the description carries `nest.check` | a Nest panel in the result; a nest form (`forms.ts`, `ProgramForm.tsx`) | M–L |
-| P4 | **Forms** for `ThermalCut` and `ThermalMark` (camlib's fields; `Lead`, `SmallHoles`, `MicroJoints`, `CommonLine` as option objects; parts picked as flat faces or named regions) | `forms.py` `OPERATIONS`/`OPTIONS` + thermal classes | `opSpecs.ts` specs and a `Cutting` group, `forms.ts` (a beam tool is `head(...)`, the T number and register are the operation's own, no `slot`) | M |
+| P4 | **there**: **Forms** for `ThermalCut` and `ThermalMark` (camlib's fields; `Lead`, `SmallHoles`, `MicroJoints`, `CommonLine` as option objects; parts picked as flat faces or named regions) | `forms.py` `OPERATIONS`/`OPTIONS` + thermal classes | `opSpecs.ts` specs and a `Cutting` group, `forms.ts` (a beam tool is `head(...)`, the T number and register are the operation's own, no `slot`) | M |
 | P5 | Examples that show **common-line cutting** (a row of flush rectangles), **marking** (QtPlasmaC materials, or a GRBL laser with `beam_mark="power"`), **wear compensation** (`diameter_register=`), a **laser** (GRBL, `beam_s_max`) | examples and tests only | the `mark` colour of P2 | S each |
-| P6 | The **torch drawn** as a nozzle and body (now a 1.5 mm "end mill" under a holder cylinder: `_tool_summary` reads the beam as a rotary tool) | `build/run.py` `_tool_summary`: a `beam` shape with nozzle and body | `playback.ts` `toolProfile`, `Viewport.tsx` `Tool` | S |
+| P6 | **there**: The **torch drawn** as a nozzle and body (now a 1.5 mm "end mill" under a holder cylinder: `_tool_summary` reads the beam as a rotary tool) | `build/run.py` `_tool_summary`: a `beam` shape with nozzle and body | `playback.ts` `toolProfile`, `Viewport.tsx` `Tool` | S |
 
 ## Milling: more examples
 

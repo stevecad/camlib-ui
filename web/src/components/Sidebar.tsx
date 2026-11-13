@@ -199,7 +199,7 @@ function setupStatus(setupId: string): { s: string; label: string; title?: strin
 /** A setup as the browser shows it: from program.py's code (the forms edit it), else from the last build's description (read only). */
 interface SetupView { id: string; code: CamSetup | null; described: SetupDescription | null; ops: { id: string; cls: string | null; kind: string | null; op: CamOp | null; summary: OperationSummary | null }[] }
 
-const addLines = (setupId: string, group: '2D' | 'Holes' | '3D' | 'Turning'): Entry[] => availableSpecs().filter((spec) => spec.group === group)
+const addLines = (setupId: string, group: '2D' | 'Holes' | '3D' | 'Turning' | 'Cutting'): Entry[] => availableSpecs().filter((spec) => spec.group === group)
   .map((spec) => ({ label: spec.label, icon: <OpIcon kind={spec.cls} size={15} />, title: spec.about, run: () => { select(`setup:${setupId}`); void openNewOp(spec.cls, setupId); } }));
 
 const downloadLines = (setupId: string): Line[] => {
@@ -234,6 +234,7 @@ function SetupRows({ view, locked }: { view: SetupView; locked: string | null })
   const play = () => void openPlayer(view.id);
   const stock = view.described?.stock;
   const lathe = view.code?.turning ?? view.described?.process === 'turning';
+  const sheet = !!view.code?.sheet;
   // The operations with a toolpath to show: the ones the build shown planned (the tree may be ahead of it).
   const built = useMemo(() => (playable ? [...stats.keys()] : []), [playable, stats]);
   const paths = usePaths((state) => state.setups[view.id]);
@@ -245,6 +246,7 @@ function SetupRows({ view, locked }: { view: SetupView; locked: string | null })
     // A lathe setup takes camlib's turning operations, any other its milling ones.
     ...(lathe
       ? [{ label: 'Add turning operation', icon: <Plus {...I} />, id: 'add-turning', reason: locked, items: addLines(view.id, 'Turning') }]
+      : sheet ? [{ label: 'Add cutting operation', icon: <Plus {...I} />, id: 'add-cutting', reason: locked, items: addLines(view.id, 'Cutting') }]
       : [{ label: 'Add 2D operation', icon: <Plus {...I} />, id: 'add-2d', reason: locked, items: addLines(view.id, '2D') },
         { label: 'Add hole operation', icon: <Plus {...I} />, id: 'add-holes', reason: locked, items: addLines(view.id, 'Holes') },
         { label: 'Add 3D operation', icon: <Plus {...I} />, id: 'add-3d', reason: locked, items: addLines(view.id, '3D') }]),

@@ -37,6 +37,9 @@ export const TurnFaceIcon = make(<><path d="M3 7h14v10H3" opacity={0.55} /><path
 export const TurnGrooveIcon = make(<><path d="M3 8h7v4h4V8h7" opacity={0.6} /><path d="M3 16h18" opacity={0.6} /><path d="M11 12V3h2v9" /></>, 'TurnGroove');
 export const TurnThreadIcon = make(<><path d="M3 9l2-2 2 2 2-2 2 2 2-2 2 2h6" opacity={0.6} /><path d="M3 15h18" opacity={0.6} /><path d="m9 9 2-6h-4Z" /></>, 'TurnThread');
 export const TurnBoreIcon = make(<><path d="M21 5H9v4h8" opacity={0.6} /><path d="M21 19H9v-4h8" opacity={0.6} /><path d="M3 12h18" strokeDasharray="1.6 1.6" opacity={0.4} /><path d="M21 12.5h-7l-1.5-3" /></>, 'TurnBore');
+// Sheet cutting: the torch over the sheet, its arc and the kerf it leaves.
+export const ThermalCutIcon = make(<><path d="M9.5 3h5v5l-1.5 3h-2L9.5 8Z" /><path d="M12 11v4" strokeWidth={2.2} /><path d="M3 17h7M14 17h7" /><path d="m8 20 1.5-1.5M16 20l-1.5-1.5M12 21v-2" opacity={0.6} /></>, 'ThermalCut');
+export const ThermalMarkIcon = make(<><path d="M9.5 3h5v5l-1.5 3h-2L9.5 8Z" /><path d="M12 11v2" /><path d="M3 17h18" /><path d="M5 14.5h5M14 14.5h5" strokeDasharray="1.6 1.6" opacity={0.7} /></>, 'ThermalMark');
 export const PostIcon = make(<><path d="M6 3h9l4 4v14H6Z" /><path d="M9 11h2M13 11h2M9 14h6M9 17h4" /></>, 'Post');
 
 
@@ -58,6 +61,7 @@ const OP_ICONS: Record<string, ReturnType<typeof make>> = {
   TurnThread: TurnThreadIcon, TurnDrill: DrillOpIcon, TurnBoreRough: TurnBoreIcon, TurnBoreFinish: TurnBoreIcon,
   turn_face: TurnFaceIcon, turn_rough: TurnIcon, turn_finish: TurnIcon, turn_groove: TurnGrooveIcon, turn_part_off: TurnGrooveIcon, turn_face_groove: TurnGrooveIcon,
   turn_thread: TurnThreadIcon, turn_drill: DrillOpIcon, turn_bore_rough: TurnBoreIcon, turn_bore_finish: TurnBoreIcon,
+  ThermalCut: ThermalCutIcon, ThermalMark: ThermalMarkIcon, thermal_cut: ThermalCutIcon, thermal_mark: ThermalMarkIcon,
 };
 export const OpIcon = ({ kind, size = 14 }: { kind: string | null; size?: number }) => {
   const Icon = (kind && OP_ICONS[kind]) || ToolpathIcon;

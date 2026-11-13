@@ -2,8 +2,8 @@
  * The Manufacture ribbon under the top bar (from STEVE Studio's Ribbon.tsx and manufacture/commands.ts): Setup, the
  * shop, the operations of the setup being worked on, then Generate, Simulate and Post. The operations follow the
  * setup (`setupKind`): a mill's are camlib's milling operations grouped 2D, Holes and 3D; a lathe's its turning
- * operations grouped Turning, Grooving, Holes and Threading; a sheet's (plasma, laser) none yet, its cuts being written
- * in code. Each button is a
+ * operations grouped Turning, Grooving, Holes and Threading; a sheet's (plasma, laser) Cut and Mark.
+ * Each button is a
  * command (commands.ts): its label, why it's unavailable (on hover), what it does. Too narrow for every group, the
  * lowest priority groups fold into one button with a menu; narrower still, the ribbon scrolls sideways.
  */
@@ -37,7 +37,7 @@ export function groupsFor(kind: 'mill' | 'lathe' | 'sheet'): Group[] {
       ACTIONS,
     ];
   }
-  if (kind === 'sheet') return [...START, ACTIONS];
+  if (kind === 'sheet') return [...START, { title: 'Cutting', priority: MID, items: ops(['ThermalCut', 'ThermalMark']) }, ACTIONS];
   return [
     ...START,
     ...(['2D', 'Holes', '3D'] as const).map((group): Group => ({ title: group, priority: MID, items: OP_SPECS.filter((spec) => spec.group === group).map((spec) => `cam.code.${spec.cls}`) })),

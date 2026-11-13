@@ -9,10 +9,11 @@ import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { AlertTriangle, ChevronRight, Code2, Crosshair, X } from 'lucide-react';
 import { OpIcon, SetupIcon } from '../icons';
 import { availableSpecs, fieldsOf, nestedOf, notTaken, OP_BY_CLASS, type FieldInfo, type Section as SectionKey } from '../cam/opSpecs';
-import { changesInPlace, emptyNested, pointsSource, pointsText, type Nested, type OpDraft, type SetupDraft } from '../cam/forms';
+import { BAD_LINES, changesInPlace, emptyNested, linesSource, linesText, pointsSource, pointsText, type Nested, type OpDraft, type SetupDraft } from '../cam/forms';
+import type { CamProgramModel } from '../cam/pyCode';
 import {
-  closeForm, commitForm, dialectOf, machinesOf, okProblem, openNewOp, presetsOf, setOpTool, showInCode, startPicking, toolSetupsOf, toolsOf, updateOp, updateSetup, useEditor,
-  useShopRecords,
+  closeForm, commitForm, dialectOf, machinesOf, okProblem, openNewOp, partsChoices, presetsOf, setOpTool, shopRecord, showInCode, startPicking, toolSetupsOf, toolsOf, updateOp, updateSetup, useEditor,
+  useProgram, useShopRecords,
 } from '../cam/programEditor';
 import { displayShortcut } from '../commands';
 
@@ -66,6 +67,16 @@ function PointsInput({ field, value, onChange }: { field: FieldInfo; value: stri
     onChange={(event) => { setText(event.target.value); onChange(pointsSource(event.target.value) ?? event.target.value); }} />;
 }
 
+/** Lines typed one per row as their points; kept as typed while a row isn't points yet (OK waits for them). */
+function LinesInput({ field, value, onChange }: { field: FieldInfo; value: string; onChange: (src: string) => void }) {
+  const [text, setText] = useState(() => (value.startsWith(BAD_LINES) ? value.slice(BAD_LINES.length) : linesText(value) ?? value));
+  // Code the program already had (a name, a helper's call) that isn't typed lines is shown as it is and kept.
+  const code = !!value && !value.startsWith(BAD_LINES) && linesText(value) === null;
+  if (code) return <span className="form-ref" id={fieldId(field.key)}><span title={value}>{value}</span><button type="button" className="icon-button small" aria-label={`Clear ${field.label}`} title="Type lines instead" onClick={() => { setText(''); onChange(''); }}><X size={13} /></button></span>;
+  return <textarea id={fieldId(field.key)} aria-label={field.label} rows={Math.max(2, text.split('\n').length)} placeholder={'(10, 10), (60, 10)\n(10, 20), (60, 20)'} spellCheck={false} value={text}
+    onChange={(event) => { setText(event.target.value); onChange(linesSource(event.target.value) ?? BAD_LINES + event.target.value); }} />;
+}
+
 /** One value as Python source: a number (or an expression the code has), Yes/No, a choice, text, a point. */
 function ValueInput({ field, value, onChange }: { field: FieldInfo; value: string; onChange: (src: string) => void }) {
   const placeholder = field.initial && field.initial !== 'None' ? `${unquote(field.initial)}` : field.required ? 'required' : 'off';
@@ -90,6 +101,7 @@ function ValueInput({ field, value, onChange }: { field: FieldInfo; value: strin
     );
   }
   if (field.kind === 'points') return <PointsInput field={field} value={value} onChange={onChange} />;
+  if (field.kind === 'lines') return <LinesInput field={field} value={value} onChange={onChange} />;
   const numeric = field.kind === 'number' || field.kind === 'integer';
   return <input id={fieldId(field.key)} aria-label={field.label} placeholder={placeholder} inputMode={numeric ? 'decimal' : undefined} spellCheck={false}
     value={field.kind === 'text' ? unquote(value) : value} onChange={(event) => { const text = event.target.value; onChange(field.kind === 'text' && text.trim() ? JSON.stringify(text) : text.trim()); }} />;
@@ -153,6 +165,38 @@ function GeometryField({ field, draft }: { field: FieldInfo; draft: OpDraft }) {
   );
 }
 
+/**
+ * A plasma or laser operation's head and parts. The head is the program's (head(shop.<machine>, shop.<recipe>)): its
+ * kerf and a cut's feed, heights, pierce and leads are that recipe's, shown here so they are seen. The parts are a
+ * flat region the program makes: a nest's result, or a PlanarRegion.
+ */
+function ThermalHead({ draft, model }: { draft: OpDraft; model: CamProgramModel | null }) {
+  const heads = Object.entries(model?.heads ?? {});
+  const head = draft.tool ? model?.heads[draft.tool] : undefined;
+  const recipe = head ? shopRecord(head.recipe) : null;
+  const s = (recipe?.definition.settings ?? {}) as Record<string, unknown>;
+  const n = (key: string, unit: string) => (typeof s[key] === 'number' ? `${s[key]} ${unit}` : null);
+  const chart = draft.cls === 'ThermalCut'
+    ? [['Kerf', n('kerf_mm', 'mm')], ['Feed', n('feed_mm_min', 'mm/min')], ['Cut height', n('cut_height_mm', 'mm')], ['Pierce', n('pierce_seconds', 's')], ['Lead-in', n('lead_in_mm', 'mm')], ['Lead-out', n('lead_out_mm', 'mm')]]
+    : [['Kerf', n('kerf_mm', 'mm')]];
+  const choices = model ? partsChoices(model) : [];
+  const parts = draft.values.parts ?? '';
+  return (
+    <>
+      <Row label="Head *" field="tool" sub={head ? `${head.machine} · ${String(recipe?.definition.name ?? head.recipe)}` : undefined}>
+        <Select ariaLabel="Head" id={fieldId('tool')} value={draft.tool ?? ''} onChange={(key) => updateOp((d) => ({ ...d, tool: key || null }))}
+          options={[{ value: '', label: heads.length ? 'Choose a head…' : 'The program makes no head(shop.…, shop.…)' }, ...heads.map(([name, item]) => ({ value: name, label: name, hint: item.recipe }))]} />
+      </Row>
+      {head && <p className="form-note" id="form-recipe">{recipe ? `From the shop’s recipe ${head.recipe}: ${chart.filter(([, value]) => value).map(([name, value]) => `${name} ${value}`).join(' · ')}. Change them in shop.py.` : `The shop has no recipe ${head.recipe}.`}</p>}
+      <Row label="Parts *" field="parts" sub="The flat parts to keep, each with its holes.">
+        <Select ariaLabel="Parts" id={fieldId('parts')} value={parts} onChange={(value) => updateOp((d) => ({ ...d, values: { ...d.values, parts: value } }))}
+          options={[{ value: '', label: choices.length ? 'Choose…' : 'The program makes no region or nest' }, ...choices,
+            ...(parts && !choices.some((item) => item.value === parts) ? [{ value: parts, label: `${parts} (the program’s code)` }] : [])]} />
+      </Row>
+    </>
+  );
+}
+
 // ── An operation ────────────────────────────────────────────────────────
 
 function OpForm({ draft, tooling, workOffset }: { draft: OpDraft; tooling: string | null; workOffset: number }) {
@@ -162,7 +206,8 @@ function OpForm({ draft, tooling, workOffset }: { draft: OpDraft; tooling: strin
   const all = toolsOf(tooling);
   const fits = all.filter((tool) => tool.cutter && spec.cutters.includes(tool.cutter));
   const tool = all.find((item) => item.key === draft.tool);
-  const fields = fieldsOf(draft.cls).filter((field) => !['id', 'tool', 'tool_number', 'length_register', 'work_offset'].includes(field.key));
+  const fields = fieldsOf(draft.cls).filter((field) => !['id', 'tool', 'tool_number', 'length_register', 'work_offset'].includes(field.key) && !(spec.thermal && field.key === 'parts'));
+  const model = useProgram((state) => state.model);
   const presets = presetsOf(tool?.cutterKey ?? null);
   const set = (key: string) => (src: string) => updateOp((d) => ({ ...d, values: { ...d.values, [key]: src } }));
   const takesFeed = fields.some((field) => field.key === 'feed_mm_min');
@@ -172,13 +217,14 @@ function OpForm({ draft, tooling, workOffset }: { draft: OpDraft; tooling: strin
       <p className="form-note">{spec.about}</p>
       <div className="form-head-fields">
         <Row label="Name *" field="id"><input id={fieldId('id')} aria-label="Name" value={draft.id} onChange={(event) => updateOp((d) => ({ ...d, id: event.target.value }))} /></Row>
-        <Row label="Tool *" field="tool" sub={tool ? `T${tool.number ?? '?'} H${tool.register ?? '?'}${tool.diameter ? ` · Ø${tool.diameter} mm` : ''}${workOffset !== 1 ? ` · work offset ${workOffset}` : ''}` : undefined}>
+        {spec.thermal && <ThermalHead draft={draft} model={model} />}
+        {!spec.thermal && <Row label="Tool *" field="tool" sub={tool ? `T${tool.number ?? '?'} H${tool.register ?? '?'}${tool.diameter ? ` · Ø${tool.diameter} mm` : ''}${workOffset !== 1 ? ` · work offset ${workOffset}` : ''}` : undefined}>
           <Select ariaLabel="Tool" id={fieldId('tool')} value={draft.tool ?? ''} onChange={(key) => setOpTool(key || null)}
             options={[{ value: '', label: fits.length ? 'Choose a tool…' : 'No tool of this kind in the tool setup' },
               ...fits.map((item) => ({ value: item.key, label: `T${item.number ?? '?'} ${item.name}`, hint: item.diameter ? `Ø${item.diameter}` : undefined })),
               ...(draft.tool && !tool ? [{ value: draft.tool, label: `${draft.tool} (not in the tool setup)` }] : [])]} />
-        </Row>
-        {!tooling && <p className="form-hint" data-tone="warn">The setup’s machine has no tool setup: set it in the setup.</p>}
+        </Row>}
+        {!tooling && !spec.thermal && <p className="form-hint" data-tone="warn">The setup’s machine has no tool setup: set it in the setup.</p>}
         {shopError && <p className="form-hint" data-tone="warn">The shop couldn’t be read: {shopError}</p>}
       </div>
       {SECTIONS.map(([section, title, open]) => {

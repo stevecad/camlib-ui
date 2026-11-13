@@ -184,7 +184,7 @@ function Deck({ source }: { source: PlayerSource }) {
           : show.grid || !stockStatus
           ? <span className="stock-note" id="stock-note" data-stock="grid"
               title={`camlib's own stock: the grid every check ran on, ${num(cell[0])} × ${num(cell[1])} mm cells (${header.stock.nx} × ${header.stock.ny}; the program's StockSpec sets the size). Shown as it is once the moves before the playing one are done: a move's cut appears at its end. Each cell shows the most material that may still be there.`}>
-              Stock: <b>camlib’s check grid</b> ({num(cell[0])} mm cells){stockError ? ` · ${stockError}` : ''}
+              Stock: <b>camlib’s check grid</b> ({num(cell[0])} mm cells){header.tools.some((tool) => tool.shape?.kind === 'beam') ? ' · table, arc and sparks drawn for context, not checked' : ''}{stockError ? ` · ${stockError}` : ''}
             </span>
           : <span className="stock-note" id="stock-note" data-stock="display" data-cell={stockStatus.cell.toFixed(4)}
               title={`What you see: the stock as a ${num(stockStatus.cell)} mm height field (${stockStatus.nx} × ${stockStatus.ny}), cut by each tool's own profile swept along the posted moves; walls are drawn where the cutter's side was. Surfaces are tinted by the operation that cut them. It is a display only: camlib's checks ran on its own ${num(cell[0])} mm grid and decide every pass and fail; "camlib grid" shows that stock.`}>

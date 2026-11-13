@@ -229,8 +229,8 @@ type Uniforms = ReturnType<typeof makeUniforms>;
  * One-sided: the top grid is a graph over XY, so every triangle faces up or out; where a wall steps across the grid,
  * the triangles facing away sit behind the ones facing the camera (drawn two-sided they'd show as dark hairlines).
  */
-function makeMaterial(part: Part, uniforms: Uniforms) {
-  const material = new THREE.MeshStandardMaterial({ color: STOCK_COLOR, metalness: 0.55, roughness: 0.42, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+function makeMaterial(part: Part, uniforms: Uniforms, color: string) {
+  const material = new THREE.MeshStandardMaterial({ color, metalness: 0.55, roughness: 0.42, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.defines = { ...shader.defines, [`HF_${part.toUpperCase()}`]: '' };
@@ -316,7 +316,8 @@ export class HeightStockView {
   private readonly geometries: THREE.BufferGeometry[];
   private readonly renderer: THREE.WebGLRenderer;
 
-  constructor(field: FieldGrid, renderer: THREE.WebGLRenderer) {
+  /** `color`: the material's (the stock's own grey by default; a sheet of plate is darker). */
+  constructor(field: FieldGrid, renderer: THREE.WebGLRenderer, color: string = STOCK_COLOR) {
     this.field = field;
     this.renderer = renderer;
     const { nx, ny } = field;
@@ -334,7 +335,7 @@ export class HeightStockView {
     const step = Math.max(1, Math.ceil(Math.sqrt((nx * ny) / MAX_VERTICES)));
     const uniforms = makeUniforms(field, step, this.height, this.ops, this.rim);
     const parts: [Part, THREE.BufferGeometry][] = [['grid', gridGeometry(field, step)], ['skirt', skirtGeometry(field)], ['bottom', bottomGeometry()]];
-    this.materials = parts.map(([part]) => makeMaterial(part, uniforms));
+    this.materials = parts.map(([part]) => makeMaterial(part, uniforms, color));
     this.geometries = parts.map(([, geometry]) => geometry);
     parts.forEach(([part, geometry], i) => {
       const mesh = new THREE.Mesh(geometry, this.materials[i]);

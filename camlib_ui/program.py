@@ -31,7 +31,7 @@ import importlib.util
 import math
 import re
 
-__all__ = ["solid", "face", "faces", "part_target", "region", "silhouette", "hole_centers", "surface", "paths", "path", "tool", "slot",
+__all__ = ["solid", "face", "faces", "part_target", "region", "silhouette", "hole_centers", "surface", "paths", "path", "polyline", "tool", "slot",
            "station", "turned", "head", "cutting", "fixture", "protected", "machine", "Program", "Target", "POSTS"]
 
 _ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
@@ -199,6 +199,24 @@ def _edge_piece(link, n, edge):
             sweep = math.tau if ccw else -math.tau   # A whole circle.
         return (start.x, start.y), (end.x, end.y), (c.x, c.y), math.degrees(sweep)
     raise ValueError(f"Edge {n!r} is a {kind.lower()}: paths follow straight edges and circular arcs.")
+
+
+def polyline(*points):
+    """Straight lines through (x, y) points, in millimetres, as a camlib TracePath: a line typed in a form (a mark on
+    a sheet). At least two points; two that coincide are refused, as camlib would."""
+    from camlib.operations import TraceLine, TracePath
+    if len(points) < 2:
+        raise ValueError("polyline takes at least two (x, y) points.")
+    clean = []
+    for p in points:
+        if not (isinstance(p, (tuple, list)) and len(p) == 2
+                and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in p)):
+            raise ValueError(f"polyline point {p!r} isn't an (x, y) pair of numbers.")
+        clean.append((float(p[0]), float(p[1])))
+    for a, b in zip(clean, clean[1:]):
+        if a == b:
+            raise ValueError(f"polyline has the point {a} twice in a row.")
+    return TracePath(clean[0], tuple(TraceLine(p) for p in clean[1:]))
 
 
 def paths(link, *names, tolerance_mm=1e-4):

@@ -31,7 +31,9 @@ export const OP_CLASSES = new Set(['Facing', 'Pocket', 'RestPocket', 'AdaptivePo
   'TrochoidalSlot', 'Drilling', 'Bore', 'Reaming', 'Tapping', 'ThreadMilling', 'Parallel', 'Waterline', 'Flat', 'Scallop', 'Pencil', 'Spiral', 'Radial',
   'Project', 'Morph',
   // A lathe setup's (camlib.turning).
-  'TurnFace', 'TurnRough', 'TurnFinish', 'TurnGroove', 'TurnPartOff', 'TurnThread', 'TurnDrill', 'TurnBoreRough', 'TurnBoreFinish', 'TurnFaceGroove']);
+  'TurnFace', 'TurnRough', 'TurnFinish', 'TurnGroove', 'TurnPartOff', 'TurnThread', 'TurnDrill', 'TurnBoreRough', 'TurnBoreFinish', 'TurnFaceGroove',
+  // A sheet setup's (plasma, laser).
+  'ThermalCut', 'ThermalMark']);
 
 /** Full precision, shortest round-trip form. */
 export function formatNumber(value: number): string {
@@ -97,7 +99,12 @@ export interface CamSetup {
   turning: boolean;
   /** A lathe setup's shop turret, from its tools' `station(shop.<turret>, tool)` (null: none, or more than one). */
   turret: string | null;
+  /** A sheet setup (a plasma or laser table's): its tools are a `head(shop.<machine>, shop.<recipe>)`, its operations camlib's Thermal* ones. */
+  sheet: boolean;
 }
+
+/** A cutting head the program makes: `torch = head(shop.<machine>, shop.<recipe>)`. */
+export interface CamHead { machine: string; recipe: string }
 
 export interface CamProgramModel {
   outline: Outline;
@@ -106,6 +113,8 @@ export interface CamProgramModel {
   program: Py | null;
   /** Tool variables: name → shop key (`mill = tool(shop.t_em10)`). */
   tools: Record<string, string>;
+  /** Cutting head variables: name → its shop machine and cutting recipe (`torch = head(shop.table, shop.steel6)`). */
+  heads: Record<string, CamHead>;
   /** The aliases the links are imported as (`from links import part, shop`). */
   part: string;
   shop: string;
@@ -119,6 +128,13 @@ export function toolKeyOf(value: Py | null, shop = 'shop'): string | null {
   if (!value || value.k !== 'call' || base(value.f) !== 'tool' || value.a?.length !== 1 || value.kw?.length) return null;
   const item = value.a[0];
   return item.k === 'attr' && item.name?.startsWith(`${shop}.`) && item.name.split('.').length === 2 ? item.name.split('.')[1] : null;
+}
+
+/** The shop machine and recipe a `head(shop.<machine>, shop.<recipe>)` call names (null: not that call, or one with a head= choice). */
+export function headOf(value: Py | null, shop = 'shop'): CamHead | null {
+  if (!value || value.k !== 'call' || base(value.f) !== 'head' || value.a?.length !== 2 || value.kw?.length) return null;
+  const keys = value.a.map((item) => (item.k === 'attr' && item.name?.startsWith(`${shop}.`) && item.name.split('.').length === 2 ? item.name.split('.')[1] : null));
+  return keys[0] && keys[1] ? { machine: keys[0], recipe: keys[1] } : null;
 }
 
 /** A lathe setup's tool: `station(shop.<turret>, <tool variable>)` as its turret's key and the variable (null: not that call). */
@@ -137,9 +153,12 @@ export function readProgram(outline: Outline): CamProgramModel | null {
   const part = aliases.includes('part') ? 'part' : aliases.find((name) => name !== 'shop') ?? 'part';
   const shop = 'shop';
   const tools: Record<string, string> = {};
+  const heads: Record<string, CamHead> = {};
   for (const [name, bound] of Object.entries(outline.bindings)) {
     const key = toolKeyOf(bound.value, shop);
     if (key) tools[name] = key;
+    const head = headOf(bound.value, shop);
+    if (head) heads[name] = head;
   }
   const program = resolve(outline, outline.bindings.program?.value);
   const programCall = program?.k === 'call' && base(program.f) === 'Program' ? program : null;
@@ -161,9 +180,10 @@ export function readProgram(outline: Outline): CamProgramModel | null {
     const operations = isTuple(opsTuple) ? opsTuple!.items!.map((element, index) => opOf(outline, id, element, index)) : [];
     const turrets = new Set((isTuple(toolsTuple) ? toolsTuple!.items! : []).map((item) => stationOf(resolve(outline, item), shop)?.turret).filter((key): key is string => !!key));
     setups.push({ variable, id, call: value, statement: statementOf(outline, variable), tools: isTuple(toolsTuple) ? toolsTuple : null, ops: isTuple(opsTuple) ? opsTuple : null,
-      operations, machine: machineOf(outline, machines, id), turning: !!value.kw?.some((kw) => kw.key === 'turning'), turret: turrets.size === 1 ? [...turrets][0] : null });
+      operations, machine: machineOf(outline, machines, id), turning: !!value.kw?.some((kw) => kw.key === 'turning'), turret: turrets.size === 1 ? [...turrets][0] : null,
+      sheet: isTuple(toolsTuple) && toolsTuple!.items!.length > 0 && toolsTuple!.items!.every((item) => item.k === 'name' && !!heads[item.name!]) });
   }
-  return { outline, setups, job: jobCall, program: programCall, tools, part, shop };
+  return { outline, setups, job: jobCall, program: programCall, tools, heads, part, shop };
 }
 
 function opOf(outline: Outline, setup: string, element: Py, index: number): CamOp {

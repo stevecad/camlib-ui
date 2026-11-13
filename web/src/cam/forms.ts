@@ -5,7 +5,7 @@
  * the Python source they were read from, so an unchanged expression stays an expression, and an unchanged part of a
  * setup (its checks, its machine) isn't rewritten at all.
  */
-import { fieldNames, fieldsOf, HIDDEN, NESTED, OP_BY_CLASS, type GeometryKind } from './opSpecs.ts';
+import { CUTTING_KEYS, fieldNames, fieldsOf, HIDDEN, KIND_NAMES, KIND_OPS, kindOfSpec, NESTED, OP_BY_CLASS, RECIPE_FIELDS, THERMAL_HIDDEN, type GeometryKind, type SetupKind } from './opSpecs.ts';
 import {
   applyEdits, argOf, base, byCode, columnOf, formatCall, freeName, freeOpId, HELPERS, importEdits, insertItem, itemColumn, pyString, removeItem, reorderItems,
   resolve, setKeyword, stationOf, type CamOp, type CamProgramModel, type CamSetup, type Edit, type Outline, type Py,
@@ -21,7 +21,7 @@ export interface Nested { cls: string | null; values: Record<string, string>; ne
 export interface OpDraft {
   cls: string;
   id: string;
-  /** The shop tool's key (`tool(shop.<key>)`). */
+  /** The shop tool's key (`tool(shop.<key>)`); a sheet operation's: the program's head variable (`torch = head(shop.…, shop.…)`). */
   tool: string | null;
   /** Python source per field (empty: left out, camlib's default). */
   values: Record<string, string>;
@@ -98,10 +98,74 @@ function readGeometry(model: CamProgramModel, value: Py, kind: GeometryKind): Ge
   return null;
 }
 
+/** What a setup machines. */
+export const setupKindOf = (setup: CamSetup): SetupKind => (setup.turning ? 'lathe' : setup.sheet ? 'sheet' : 'mill');
+
+/**
+ * A call's keywords with its `**` arguments opened: `**plan` where plan is a dict(...) of keywords (and theirs), and
+ * the one `**cutting(shop.<recipe>, shop.<machine>, ...)` that gives a cut its recipe's values.
+ */
+function openKeywords(outline: Outline, call: Py, problems: string[], depth = 0): { plain: { key: string; value: Py }[]; cutting: Py | null } {
+  const out: { plain: { key: string; value: Py }[]; cutting: Py | null } = { plain: [], cutting: null };
+  for (const kw of call.kw ?? []) {
+    if (kw.key !== null) { out.plain.push({ key: kw.key, value: kw.value }); continue; }
+    const value = resolve(outline, kw.value);
+    if (value?.k === 'call' && base(value.f) === 'cutting' && !out.cutting) { out.cutting = value; continue; }
+    if (value?.k === 'call' && base(value.f) === 'dict' && !(value.a ?? []).length && depth < 4) {
+      const inner = openKeywords(outline, value, problems, depth + 1);
+      out.plain.push(...inner.plain);
+      if (inner.cutting && !out.cutting) out.cutting = inner.cutting; else if (inner.cutting) problems.push('It has two cutting(...) recipes');
+      continue;
+    }
+    problems.push('It has a ** argument the form doesn’t know');
+  }
+  return out;
+}
+
+/** A plasma or laser operation's call as its form's draft. */
+function readThermal(model: CamProgramModel, op: CamOp): { draft: OpDraft | null; problems: string[]; tooling: string | null } {
+  const cls = op.cls!, call = op.call!;
+  const names = fieldNames(cls);
+  const problems: string[] = [];
+  const draft = newOp(cls, op.id ?? '');
+  const labelOf = (key: string) => fieldsOf(cls).find((field) => field.key === key)?.label ?? key;
+  const each = (key: string, value: Py) => {
+    if (key === 'id') { if (value.k !== 'str') problems.push('Its id is code'); return; }
+    if (key === 'tool') {
+      if (value.k === 'name' && model.heads[value.name!]) draft.tool = value.name!;
+      else problems.push('Its head isn’t a head(shop.…, shop.…) of the program');
+      return;
+    }
+    if (key === 'parts') { if (value.k === 'none') problems.push('It has no parts'); else draft.values.parts = value.src; return; }
+    if (cls === 'ThermalCut' && RECIPE_FIELDS.has(key)) { problems.push(`${key} is set in the code (a form takes it from the shop’s cutting recipe)`); return; }
+    if (NESTED[key]) { const nested = readNested(model.outline, value, NESTED[key].classes, problems, labelOf(key)); if (nested) draft.nested[key] = nested; return; }
+    if (key === 'paths') { draft.values.paths = resolve(model.outline, value)?.src ?? value.src; return; }
+    if (value.k === 'code' || (value.v === undefined && value.k !== 'none')) { problems.push(`${labelOf(key)} is code the form can’t show`); return; }
+    draft.values[key] = value.src;
+  };
+  (call.a ?? []).forEach((value, i) => (names[i] ? each(names[i], value) : problems.push('It has an extra argument')));
+  const { plain, cutting } = openKeywords(model.outline, call, problems);
+  for (const kw of plain) { if (names.includes(kw.key)) each(kw.key, kw.value); else problems.push(`${kw.key} isn’t one of its fields`); }
+  if (cls === 'ThermalCut') {
+    const head = draft.tool ? model.heads[draft.tool] : null;
+    const key = (value: Py | undefined) => (value?.k === 'attr' && value.name?.startsWith(`${model.shop}.`) ? value.name.split('.')[1] : null);
+    if (!cutting) problems.push('Its feed, heights and leads aren’t a cutting(shop.<recipe>, shop.<machine>, …) of the shop');
+    else {
+      if (head && (key(cutting.a?.[0]) !== head.recipe || key(cutting.a?.[1]) !== head.machine)) problems.push('Its cutting(...) recipe or machine isn’t its head’s');
+      for (const kw of cutting.kw ?? []) {
+        if (!kw.key || !CUTTING_KEYS.includes(kw.key) || kw.value.v === undefined) problems.push('Its cutting(...) has an argument the form doesn’t know');
+        else draft.values[kw.key] = kw.value.src;
+      }
+    }
+  }
+  return { draft: problems.length ? null : draft, problems, tooling: null };
+}
+
 /** An operation's call as its form's draft, and what the form can't show (then it's edited in code). */
 export function readOp(model: CamProgramModel, op: CamOp): { draft: OpDraft | null; problems: string[]; tooling: string | null } {
   if (!op.call || !op.cls || !OP_BY_CLASS[op.cls]) return { draft: null, problems: ['It isn’t an operation the forms know'], tooling: null };
   const spec = OP_BY_CLASS[op.cls];
+  if (spec.thermal) return readThermal(model, op);
   const names = fieldNames(op.cls);
   const problems: string[] = [];
   const draft = newOp(op.cls, op.id ?? '');
@@ -152,9 +216,11 @@ export function readOp(model: CamProgramModel, op: CamOp): { draft: OpDraft | nu
 export function missingOf(draft: OpDraft): string[] {
   const out: string[] = [];
   if (!draft.id.trim()) out.push('Name');
-  if (!draft.tool) out.push('Tool');
+  const thermal = !!OP_BY_CLASS[draft.cls]?.thermal;
+  if (!draft.tool) out.push(thermal ? 'Head' : 'Tool');
+  if (thermal && !(draft.values.parts ?? '').trim()) out.push('Parts');
   for (const field of fieldsOf(draft.cls)) {
-    if (HIDDEN.has(field.key) || !field.required) continue;
+    if ((thermal ? THERMAL_HIDDEN : HIDDEN).has(field.key) || !field.required) continue;
     if (field.kind === 'geometry') { const g = draft.geometry[field.key]; if (!g || (!g.src && !g.whole && !g.names?.length && !g.points?.length)) out.push(field.label); continue; }
     if (field.kind === 'nested') { if (!draft.nested[field.key]?.cls) out.push(field.label); continue; }
     if (!(draft.values[field.key] ?? '').trim()) out.push(field.label);
@@ -169,6 +235,9 @@ const POINT = String.raw`\(\s*${NUMBER}\s*,\s*${NUMBER}\s*\)`;
 const POINT_LIST = new RegExp(String.raw`^\s*${POINT}(?:\s*,\s*${POINT})*\s*,?\s*$`);
 
 /** Typed points, `(10, 0), (90, 0)`, as Python source (a tuple of them); null when they aren't (x, y) points of numbers. */
+/** What a lines field holds while its text isn't lines yet: the text, marked (never written: the form's OK refuses it). */
+export const BAD_LINES = '#lines:';
+
 export const pointsSource = (text: string): string | null => (!text.trim() ? '' : POINT_LIST.test(text) ? `(${text.trim().replace(/,$/, '')},)` : null);
 /** A point list's source as the form shows it: without its outer brackets (anything else, a name or an expression, as it is). */
 export function pointsText(src: string): string {
@@ -178,11 +247,47 @@ export function pointsText(src: string): string {
 /** Whether a point list's source is one: literal (x, y) points, or code the program already had (a name, an expression). */
 const pointsOk = (src: string) => !src.trim() || pointsText(src) !== src || /^[A-Za-z_][\w.]*$/.test(src.trim());
 
+/**
+ * Lines typed one per row as their points, `(0, 0), (40, 0)`, as Python source: a tuple of camlib-ui polyline(...)
+ * paths. Null when a row isn't at least two (x, y) points of numbers.
+ */
+export function linesSource(text: string): string | null {
+  const rows = text.split('\n').map((row) => row.trim()).filter(Boolean);
+  if (!rows.length) return '';
+  const POINTS = new RegExp(String.raw`^${POINT}(?:\s*,\s*${POINT})+\s*,?$`);
+  if (!rows.every((row) => POINTS.test(row))) return null;
+  return `(${rows.map((row) => `polyline(${row.replace(/,$/, '').replace(/\s+/g, ' ')})`).join(', ')},)`;
+}
+/** A tuple of polyline(...) paths as the form shows it, one per row (null: other code, kept and shown as it is). */
+export function linesText(src: string): string | null {
+  const inner = /^\s*[([]([\s\S]*)[)\]]\s*$/.exec(src)?.[1];
+  if (inner === undefined) return null;
+  const rows: string[] = [];
+  let at = 0;
+  while (at < inner.length) {
+    const rest = inner.slice(at);
+    const lead = /^[\s,]*/.exec(rest)![0].length;
+    if (lead === rest.length) break;
+    if (!rest.startsWith('polyline(', lead)) return null;
+    // To the parenthesis that closes this polyline( (its points hold one level of their own).
+    let depth = 0, end = -1;
+    for (let i = lead + 'polyline'.length; i < rest.length; i++) {
+      if (rest[i] === '(') depth++;
+      else if (rest[i] === ')' && --depth === 0) { end = i; break; }
+    }
+    if (end < 0) return null;
+    rows.push(rest.slice(lead + 'polyline('.length, end).trim());
+    at += end + 1;
+  }
+  return rows.length && linesSource(rows.join('\n')) !== null ? rows.join('\n') : null;
+}
+
 /** Values a form holds that camlib couldn't read: point lists that aren't (x, y) points (labels, for the OK button). */
 export function invalidOf(draft: OpDraft): string[] {
   const out: string[] = [];
   const check = (cls: string, values: Record<string, string>, prefix: string) => {
     for (const field of fieldsOf(cls)) if (field.kind === 'points' && !pointsOk(values[field.key] ?? '')) out.push(`${prefix}${field.label}`);
+    for (const field of fieldsOf(cls)) if (field.kind === 'lines' && (values[field.key] ?? '').startsWith(BAD_LINES)) out.push(`${prefix}${field.label}`);
   };
   check(draft.cls, draft.values, '');
   const nested = (item: Nested, label: string) => { if (item.cls) { check(item.cls, item.values, `${label}: `); Object.values(item.nested).forEach((inner) => nested(inner, label)); } };
@@ -221,9 +326,15 @@ function emitGeometry(geometry: Geometry, kind: GeometryKind, part: string): str
 /** The camlib classes and camlib-ui helpers an operation's code uses (for its imports). */
 export function usesOf(draft: OpDraft): { camlib: string[]; helpers: string[] } {
   if (OP_BY_CLASS[draft.cls]?.turning) return { camlib: [draft.cls], helpers: [] };
-  const camlib = [draft.cls], helpers = ['slot', 'tool'];
+  const thermal = !!OP_BY_CLASS[draft.cls]?.thermal;
+  const camlib = [draft.cls], helpers = thermal ? [] : ['slot', 'tool'];
   const nested = (item: Nested) => { if (item.cls) camlib.push(item.cls); Object.values(item.nested).forEach(nested); };
   Object.values(draft.nested).forEach(nested);
+  if (thermal) {
+    if (draft.cls === 'ThermalCut') helpers.push('cutting');
+    if (/\bpolyline\(/.test(draft.values.paths ?? '')) helpers.push('polyline');
+    return { camlib, helpers };
+  }
   const spec = OP_BY_CLASS[draft.cls];
   for (const [key, geometry] of Object.entries(draft.geometry)) {
     const kind = spec?.geometry[key];
@@ -233,12 +344,29 @@ export function usesOf(draft: OpDraft): { camlib: string[]; helpers: string[] } 
 }
 
 /** The operation's call as code, at `column` (wrapped under its parenthesis past 118 columns). */
-export function emitOp(draft: OpDraft, ctx: { toolVar: string; tooling: string; part: string; shop: string; workOffset: number; column: number }): string {
+export function emitOp(draft: OpDraft, ctx: { toolVar: string; tooling: string; part: string; shop: string; workOffset: number; column: number; head?: { machine: string; recipe: string } | null }): string {
   const spec = OP_BY_CLASS[draft.cls];
   if (spec.turning) {
     // camlib's turning operations name their tool by its id (the shop key); its station and offset are the setup's.
     const values = fieldsOf(draft.cls).filter((field) => !HIDDEN.has(field.key) && (draft.values[field.key] ?? '').trim()).map((field) => `${field.key}=${draft.values[field.key].trim()}`);
     return formatCall(draft.cls, [pyString(draft.id.trim()), pyString(draft.tool ?? ''), ...values], Math.max(0, ctx.column));
+  }
+  if (spec.thermal) {
+    // Its head is the program's head(...) variable; a cut's process values are the shop's recipe of that head.
+    const parts = [pyString(draft.id.trim()), draft.tool ?? '', (draft.values.parts ?? '').trim()];
+    for (const field of fieldsOf(draft.cls)) {
+      if (THERMAL_HIDDEN.has(field.key) || (draft.cls === 'ThermalCut' && CUTTING_KEYS.includes(field.key))) continue;
+      if (field.kind === 'nested') { const nested = draft.nested[field.key]; if (nested) parts.push(`${field.key}=${emitNested(nested)}`); continue; }
+      const value = (draft.values[field.key] ?? '').trim();
+      if (value) parts.push(`${field.key}=${value}`);
+    }
+    if ((draft.values.work_offset ?? '').trim()) parts.push(`work_offset=${draft.values.work_offset.trim()}`);
+    parts.push(`tool_number=${(draft.values.tool_number ?? '').trim() || '1'}`, `length_register=${(draft.values.length_register ?? '').trim() || '1'}`);
+    if (draft.cls === 'ThermalCut' && ctx.head) {
+      const own = [`height_mode=${(draft.values.height_mode ?? '').trim() || '"fixed"'}`, ...['lead_in_radius_mm', 'lead_out_radius_mm'].map((key) => `${key}=${(draft.values[key] ?? '').trim()}`)];
+      parts.push(`**cutting(${ctx.shop}.${ctx.head.recipe}, ${ctx.shop}.${ctx.head.machine}, ${own.join(', ')})`);
+    }
+    return formatCall(draft.cls, parts, Math.max(0, ctx.column));
   }
   const parts = [pyString(draft.id.trim()), ctx.toolVar];
   for (const field of fieldsOf(draft.cls)) {
@@ -315,7 +443,9 @@ export function writeOp(code: string, model: CamProgramModel, setupId: string, d
   if (!setup.ops) throw new FormError('This setup’s operations are code the forms can’t change: edit it in code.');
   const { tooling, workOffset } = setupContext(setup);
   const turning = !!OP_BY_CLASS[draft.cls]?.turning;
-  if (turning !== setup.turning) throw new FormError(setup.turning ? `${draft.cls} is a milling operation: ${setup.id} is a lathe setup.` : `${draft.cls} is a turning operation: ${setup.id} isn’t a lathe setup.`);
+  const kind = kindOfSpec(OP_BY_CLASS[draft.cls]);
+  if (kind !== setupKindOf(setup)) throw new FormError(`${draft.cls} is a ${KIND_OPS[kind]} operation: ${setup.id} is ${KIND_NAMES[setupKindOf(setup)]}.`);
+  if (kind === 'sheet') return writeThermal(code, model, setup, draft, op, index);
   if (!tooling) throw new FormError(turning ? 'This setup’s tools name no one turret (station(shop.<turret>, tool)): add the tool in code.' : 'This setup’s machine has no tool setup (tooling=shop.…): set it in the setup.');
   if (!draft.tool) throw new FormError('Pick a tool.');
   const others = model.setups.flatMap((item) => item.operations).filter((item) => item !== op).map((item) => item.id);
@@ -334,6 +464,23 @@ export function writeOp(code: string, model: CamProgramModel, setupId: string, d
     const text = emitOp(draft, { toolVar: variable, tooling, part: model.part, shop: model.shop, workOffset, column });
     edits.push(insertItem(code, setup.ops, text, index, true));
   }
+  return applyEdits(code, edits);
+}
+
+/** A plasma or laser operation added to a sheet setup, or rewritten in place. */
+function writeThermal(code: string, model: CamProgramModel, setup: CamSetup, draft: OpDraft, op: CamOp | null, index?: number): string {
+  const head = draft.tool ? model.heads[draft.tool] : null;
+  if (!draft.tool || !head) throw new FormError('Pick the cutting head.');
+  if (!(setup.tools?.items ?? []).some((item) => item.k === 'name' && item.name === draft.tool)) throw new FormError(`${draft.tool} isn’t one of this setup’s tools: a sheet setup cuts with its own head.`);
+  if (!(draft.values.parts ?? '').trim()) throw new FormError('Choose the parts.');
+  const others = model.setups.flatMap((item) => item.operations).filter((item) => item !== op).map((item) => item.id);
+  if (others.includes(draft.id.trim())) throw new FormError(`Another operation is already called ${draft.id.trim()}.`);
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(draft.id.trim())) throw new FormError('A name is letters, digits and _ . : - only.');
+  const uses = usesOf(draft);
+  const edits = importEdits(model.outline, { camlib: uses.camlib, [HELPERS]: uses.helpers });
+  const ctx = { toolVar: draft.tool, tooling: '', part: model.part, shop: model.shop, workOffset: 1, head };
+  if (op?.call) edits.push({ at: op.call.s, text: emitOp(draft, { ...ctx, column: columnOf(code, op.call.s[0]) }) });
+  else edits.push(insertItem(code, setup.ops!, emitOp(draft, { ...ctx, column: itemColumn(code, setup.ops!, true) }), index, true));
   return applyEdits(code, edits);
 }
 

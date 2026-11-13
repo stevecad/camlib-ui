@@ -10,7 +10,7 @@ import {
 import * as THREE from 'three';
 import { cancelBuild, dirtyFiles, openPlayer, revealIn, running, saveAll, showAllPaths, startBuild, useApp, usePaths, usePlayer } from './state';
 import { openNewOp, openSetup, useProgram } from './cam/programEditor';
-import { availableSpecs, fieldsLoaded, OP_SPECS } from './cam/opSpecs';
+import { availableSpecs, fieldsLoaded, KIND_NAMES, KIND_OPS, kindOfSpec, OP_SPECS, type SetupKind } from './cam/opSpecs';
 import { opIconOf, PostIcon, SetupIcon, SimulateToolIcon, ToolpathIcon } from './icons';
 import { setting, updateSetting } from './settings';
 import { useView, viewer, type DisplayStyle, type StandardView } from './viewport/viewer';
@@ -69,19 +69,21 @@ export function setupKind(): 'mill' | 'lathe' | 'sheet' {
   const setup = targetSetup();
   if (!setup) return 'mill';
   if (setup.turning) return 'lathe';
+  if (setup.sheet) return 'sheet';
   const classes = setup.operations.map((op) => op.cls).filter(Boolean);
   return classes.length > 0 && classes.every((cls) => cls!.startsWith('Thermal')) ? 'sheet' : 'mill';
 }
 const needsProgramFile = () => (app().project ? true : 'Open or create a project first.');
 /** An operation's form: camlib has it, and the program has a setup to put it in. */
-const opReason = (cls: string, turning: boolean) => () => {
+const opReason = (cls: string, kind: SetupKind) => () => {
   if (!app().project) return 'Open or create a project first.';
   if (fieldsLoaded() && !availableSpecs().some((spec) => spec.cls === cls)) return 'The installed camlib doesn’t have this operation.';
   const setups = useProgram.getState().model?.setups ?? [];
   if (!setups.length) return useProgram.getState().problem ?? 'Add a setup first (Setup).';
   // The setup it would go into: a lathe's or a mill's.
   const target = targetSetup()!;
-  if (target.turning !== turning) return target.turning ? `${target.id} is a lathe setup: it takes turning operations.` : `${target.id} isn’t a lathe setup: turning operations go into one (written in code: docs/programs.md, Lathes).`;
+  const targetKind = setupKind();
+  if (targetKind !== kind) return `${target.id} is ${KIND_NAMES[targetKind]}: it takes ${KIND_OPS[targetKind]} operations.`;
   return true;
 };
 const needsProject = () => !!app().project || 'Open or create a project first.';
@@ -215,8 +217,8 @@ export const commands: Command[] = [
   { id: 'cam.shop', label: 'Shop', icon: Library, category: 'Manufacture', run: () => void revealIn('shop.py', 1, false),
     description: 'Your shop as code (shop.py): machines, controllers, tools, tool setups and fixtures.', enabled: () => (app().project?.shop === 'shop.py' ? true : app().project?.shop ? 'This project uses the projects folder’s shop.py.' : 'The project has no shop.py.') },
   ...OP_SPECS.map((spec): Command => ({
-    id: `cam.code.${spec.cls}`, label: spec.turning ? `Turning: ${spec.label.toLowerCase()}` : spec.label, short: spec.label, icon: opIconOf(spec.cls) as IconType, category: 'Manufacture', description: spec.about,
-    run: () => void openNewOp(spec.cls), enabled: opReason(spec.cls, !!spec.turning),
+    id: `cam.code.${spec.cls}`, label: spec.turning ? `Turning: ${spec.label.toLowerCase()}` : spec.thermal ? `Plasma/laser: ${spec.label.toLowerCase()}` : spec.label, short: spec.label, icon: opIconOf(spec.cls) as IconType, category: 'Manufacture', description: spec.about,
+    run: () => void openNewOp(spec.cls), enabled: opReason(spec.cls, kindOfSpec(spec)),
   })),
   { id: 'cam.generate', label: 'Generate toolpaths', short: 'Generate', icon: ToolpathIcon as IconType, category: 'Manufacture', run: () => { void startBuild('full'); },
     description: 'Plan every setup, check every move, post, and release the G-code camlib clears.', enabled: all(needsProgram, needsIdle) },

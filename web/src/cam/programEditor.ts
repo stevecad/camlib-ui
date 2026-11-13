@@ -7,10 +7,10 @@
 import { create } from 'zustand';
 import { api, type PartMesh } from '../api';
 import { findDefinition, revealIn, startBuild, toast, useApp } from '../state';
-import { fieldsLoaded, OP_BY_CLASS, setFields, turningToolType, type CamlibField, type CutterType, type GeometryKind, fieldNames } from './opSpecs';
-import { freeOpId, readProgram, type CamOp, type CamProgramModel, type Outline } from './pyCode';
+import { CUTTING_KEYS, fieldsLoaded, KIND_NAMES, KIND_OPS, kindOfSpec, OP_BY_CLASS, setFields, turningToolType, type CamlibField, type CutterType, type GeometryKind, fieldNames } from './opSpecs';
+import { base, freeOpId, readProgram, type CamOp, type CamProgramModel, type CamSetup, type Outline } from './pyCode';
 import {
-  deleteOp, duplicateOp, FormError, invalidOf, missingOf, newOp, newProgramCode, readOp, readSetup, reorderOps, setupContext, writeOp, writeSetup, type Geometry, type OpDraft, type SetupDraft,
+  deleteOp, duplicateOp, FormError, invalidOf, missingOf, newOp, newProgramCode, readOp, readSetup, reorderOps, setupContext, setupKindOf, writeOp, writeSetup, type Geometry, type OpDraft, type SetupDraft,
 } from './forms';
 
 const PROGRAM = 'program.py';
@@ -137,6 +137,8 @@ export async function ensureShop(force = false) {
 const records = () => useShopRecords.getState().records;
 const ref = (value: unknown) => (value && typeof value === 'object' && '$ref' in (value as object) ? String((value as { $ref: unknown }).$ref) : null);
 const byKey = (key: string | null) => (key ? records().find((record) => record.key === key) ?? null : null);
+/** A shop record by its key (null: the shop has none). */
+export const shopRecord = (key: string | null) => byKey(key);
 const ofKind = (kind: string) => records().filter((record) => record.kind === kind);
 const nameOf = (record: ShopRecord) => String(record.definition.name ?? record.key);
 
@@ -292,10 +294,12 @@ export async function openNewOp(cls: string, setupId: string | null = null) {
   if (!setup) { toast('Add a setup first (Setups → New setup).', 'info'); return; }
   await ensureShop();
   const spec = OP_BY_CLASS[cls];
-  if (!!spec.turning !== setup.turning) {
-    toast(setup.turning ? `${setup.id} is a lathe setup: it takes turning operations (right-click it → Add turning operation).` : `${spec.label} is a turning operation: ${setup.id} isn’t a lathe setup.`, 'info');
+  const kind = setupKindOf(setup);
+  if (kindOfSpec(spec) !== kind) {
+    toast(`${spec.label} is a ${KIND_OPS[kindOfSpec(spec)]} operation: ${setup.id} is ${KIND_NAMES[kind]} (right-click it → Add ${KIND_OPS[kind]} operation).`, 'info');
     return;
   }
+  if (kind === 'sheet') { openNewThermal(cls, read, setup, pending, pending && waiting ? waiting.base : read.code); return; }
   const draft = newOp(cls, freeOpId(read.model, spec.prefix));
   const { tooling, workOffset } = setupContext(setup);
   const tools = toolsOf(tooling).filter((tool) => tool.cutter && spec.cutters.includes(tool.cutter));
@@ -316,6 +320,37 @@ export async function openNewOp(cls: string, setupId: string | null = null) {
   const base = pending && waiting ? waiting.base : read.code;
   open({ mode: 'op', setup: setup.id, editing: null, draft, tooling, workOffset, prefilled, pending, base, known }, firstGeometry(cls));
 }
+
+/**
+ * The flat regions a sheet operation can take as its parts, as the program's code names them: a nest's result
+ * (`<name>.region`, where `<name> = Nest…(...).run()`) and every PlanarRegion the program makes.
+ */
+export function partsChoices(model: CamProgramModel): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  for (const [name, bound] of Object.entries(model.outline.bindings)) {
+    const value = bound.value;
+    if (value.k === 'call' && base(value.f) === 'PlanarRegion') out.push({ value: name, label: `${name} (a region of the program)` });
+    else if (/^Nest\b[\s\S]*\.run\(\)\s*$/.test(value.src)) out.unshift({ value: `${name}.region`, label: `${name}.region (the nested parts)` });
+  }
+  return out;
+}
+
+/** The form of a new plasma or laser operation: its head the setup's, the rest as the setup's last such operation says. */
+function openNewThermal(cls: string, read: { code: string; model: CamProgramModel }, setup: CamSetup, pending: Pending | null, baseCode: string) {
+  const spec = OP_BY_CLASS[cls];
+  const draft = newOp(cls, freeOpId(read.model, spec.prefix));
+  const heads = (setup.tools?.items ?? []).map((item) => item.name!).filter((name) => read.model.heads[name]);
+  if (heads.length === 1) draft.tool = heads[0];
+  const prefilled: string[] = [];
+  const fill = (key: string, value: string | undefined) => { if (value && fieldNamesOfThermal(cls).includes(key)) { draft.values[key] = value; prefilled.push(key); } };
+  const last = setup.operations.map((op) => readOp(read.model, op).draft).filter((item): item is OpDraft => !!item).at(-1);
+  for (const key of ['parts', 'tool_number', 'length_register', ...CUTTING_KEYS]) fill(key, last?.values[key]);
+  const choices = partsChoices(read.model);
+  if (!draft.values.parts && choices.length === 1) fill('parts', choices[0].value);
+  open({ mode: 'op', setup: setup.id, editing: null, draft, tooling: null, workOffset: 1, prefilled, pending, base: baseCode, known: { byTool: {}, top: null } }, null);
+}
+/** A thermal operation's own field names, with a cut's cutting(...) arguments. */
+const fieldNamesOfThermal = (cls: string) => [...fieldNames(cls), ...(cls === 'ThermalCut' ? CUTTING_KEYS : [])];
 
 /** The form of an operation of the program, or why it's edited in code. */
 export async function openEditOp(operation: string) {

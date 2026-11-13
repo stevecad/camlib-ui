@@ -23,6 +23,7 @@ import { findingMove, severityOf, simPlan, simPosition, toolProfile, type SimPla
 import type { SimReply, SimRequest } from '../cam/stockSim.worker';
 import { isTurned } from '../cam/stream';
 import SectionLayer from '../viewport/SectionLayer';
+import { CuttingHead, CuttingTable, isBeam, PLATE_COLOR, TABLE_DEPTH } from './SheetView';
 import { TurnedBar, TurnedStock, TurningTool } from './TurningView';
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -171,7 +172,8 @@ function GridStock({ source, mode }: { source: PlayerSource; mode: 'solid' | 'tr
   const renderer = useThree((state) => state.gl);
   const view = useMemo(() => {
     const stock = source.header.stock;
-    return new HeightStockView(fieldGrid(stock.min_mm, stock.max_mm, { nx: stock.nx, ny: stock.ny }), renderer);
+    // A sheet on a plasma or laser table: hot-rolled plate, darker than a machined block.
+    return new HeightStockView(fieldGrid(stock.min_mm, stock.max_mm, { nx: stock.nx, ny: stock.ny }), renderer, source.header.tools.some(isBeam) ? PLATE_COLOR : undefined);
   }, [source, renderer]);
   useEffect(() => {
     const field = view.field, top = source.header.stock.max_mm[2];
@@ -506,7 +508,7 @@ export default function Viewport() {
         <SurfaceProbe />
         <hemisphereLight args={['#dfe8ff', '#30363b', 0.9]} />
         <directionalLight position={[200, -300, 500]} intensity={0.6} />
-        {view.showGrid && <gridHelper args={[1000, 100, '#3a4349', '#262c31']} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, (box?.min.z ?? 0) - 0.01]} raycast={() => null} userData={{ uncut: true }} />}
+        {view.showGrid && <gridHelper args={[1000, 100, '#3a4349', '#262c31']} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, (box?.min.z ?? 0) - 0.01 - (source && show.fixtures && source.header.tools.some(isBeam) ? TABLE_DEPTH + 3 : 0)]} raycast={() => null} userData={{ uncut: true }} />}
         {view.showOrigin && <group userData={{ uncut: true }}><WorkTriad size={Math.max(5, size * 0.12)} /></group>}
         {part.mesh && (formOpen || (!view.partHidden && (show.part || !source))) && <PartView mesh={part.mesh} translucent={!!source && !formOpen} />}
         {setup && !streaming && (setup.stock?.kind === 'turned' ? <TurnedBar stock={setup.stock} /> : <StockBox setup={setup} />)}
@@ -518,7 +520,8 @@ export default function Viewport() {
             : <DisplayStock source={source} plan={plan} mode={show.stock as 'solid' | 'translucent'} />)}
         {setup?.machines[0] && show.fixtures && <Fixtures machine={setup.machines[0]} />}
         {source && show.toolpath && !formOpen && <Toolpath motion={source.motion} owners={source.owners} hidden={hidden} />}
-        {source && show.tool && !formOpen && (source.header.tools.some((tool) => tool.turning) ? <TurningTool source={source} /> : <Tool source={source} />)}
+        {source && show.tool && !formOpen && (source.header.tools.some((tool) => tool.turning) ? <TurningTool source={source} /> : source.header.tools.some(isBeam) ? <CuttingHead source={source} /> : <Tool source={source} />)}
+        {source && show.fixtures && source.header.tools.some(isBeam) && <CuttingTable stock={source.header.stock} />}
         {source && !formOpen && machineResult && machineResult.findings.some((finding) => finding.move != null) && <FindingMarks source={source} machine={machineResult} size={size} hidden={hidden} />}
         {box && <SectionLayer box={box} />}
       </Canvas>

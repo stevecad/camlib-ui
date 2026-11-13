@@ -339,8 +339,24 @@ edge; it refuses a nest that doesn't fit and says which part. `ThermalCut` order
 outline), runs the kerf beside each part, places every pierce and lead in the scrap and proves them clear of every
 part before any motion; its report (the result's Operations) lists the parts, loops, pierces and the order. Leads,
 overcut, `SmallHoles`, `MicroJoints`, `CommonLine` and `ThermalMark` are camlib's (its `docs/operations.md`, "Plasma
-and laser cutting") and are written in the code.
+and laser cutting").
+
+**The forms.** With a sheet setup selected the ribbon's Cutting group has **Cut** (`ThermalCut`) and **Mark**
+(`ThermalMark`); double-click an operation to edit it. A cut's form takes the head (the program's
+`head(shop.<machine>, shop.<recipe>)`), the parts (a nest's `.region`, or a `PlanarRegion` the program makes), the
+overcut, the lead arcs' radii, whose heights are used (`height_mode`), torch height control, small holes,
+micro-joints, common lines and kerf compensation. Feed, cut height, pierce and lead lengths are not fields: they are
+the shop's recipe, shown in the form and written as `**cutting(shop.<recipe>, shop.<machine>, ...)`. A cut written
+with a `**plan` dict of keywords (as the example's is) reads into the form and is written back as one call. A
+mark's lines are typed one per row as their points on the sheet, `(x, y), (x, y)`, and written as
+`polyline(...)` paths (`camlib_ui.program.polyline`); its feed, height, power and width are the form's, since a
+recipe holds none. How a machine marks is the machine's own: camlib's QtPlasmaC post takes
+`machine(..., mark_material=, cut_material=, material_wait_s=)` (two entries of the table's material file) and
+refuses a program with a mark without them; the Centroid and WinCNC plasma posts declare no marking.
 
 In the playback the sheet is camlib's own stock grid: every kerf is cut through it as the torch passes, lead moves are
-drawn in their own colour, and the view cube’s top view looks straight down on the sheet. The operations of a
-sheet setup are edited in the code: the forms have none for `ThermalCut` yet ([machine-types.md](machine-types.md)).
+drawn in their own colour, and the view cube’s top view looks straight down on the sheet. The head is drawn as a
+torch inside the nozzle and body the shop declares (what camlib checks against the sheet). While a cut or lead move
+plays, its arc is shown: the jet through the sheet, its glare and light, and sparks. The sheet lies on a slat table.
+The arc, the sparks and the table are drawn for context only: no table is declared to camlib and nothing is checked
+against them (the player's stock note says so; the Fixtures toggle hides the table).

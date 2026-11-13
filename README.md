@@ -18,8 +18,8 @@ plasma cutting program in Python, build it, see what camlib planned, checked and
 - **Projects on disk**: a folder per project with its part (STEP or a CadQuery script), its shop (machines, tools,
   fixtures as Python) and its program (camlib itself, plus a few helpers). See [docs/programs.md](docs/programs.md).
 - **Toolpaths without writing code**: the browser's Setups list the program's setups and operations as its code says.
-  The ribbon shows the operations of the setup being worked on: a mill's (2D, Holes, 3D) or a lathe's (Turning,
-  Grooving, Holes, Threading).
+  The ribbon shows the operations of the setup being worked on: a mill's (2D, Holes, 3D), a lathe's (Turning,
+  Grooving, Holes, Threading) or a plasma or laser table's (Cutting: Cut and Mark).
   Right-click a setup to add any of camlib's 25 milling operations (face, pocket, contour, drill, bore, tap, parallel,
   waterline, …) through a form; double-click one to edit it; drag, Delete, F2 and Ctrl+D reorder, delete, edit and
   duplicate. Faces, hole walls and edges are picked on the part. Every field is camlib's own (from the installed
@@ -56,8 +56,9 @@ plasma cutting program in Python, build it, see what camlib planned, checked and
   each machine type and what is planned.
 - **Plasma and laser tables**: a sheet project (the `sheet` example) nests flat parts on a sheet with camlib's `Nest`
   and cuts them with a torch or a laser head (`ThermalCut`: pierces, leads and kerf paths proven clear of every part),
-  posted with camlib's QtPlasmaC, Centroid plasma, WinCNC or GRBL laser post. The playback shows the sheet with every
-  kerf cut through. See [docs/programs.md](docs/programs.md#plasma-and-laser-tables).
+  posted with camlib's QtPlasmaC, Centroid plasma, WinCNC or GRBL laser post. The Cut and Mark forms write `ThermalCut` and `ThermalMark` with the head and cut chart of the shop's recipe. The
+  playback shows the torch over a plate on a slat table, its arc and sparks while it cuts, and every kerf cut through
+  the sheet (the table, arc and sparks are drawn for context; camlib checks the head against the sheet). See [docs/programs.md](docs/programs.md#plasma-and-laser-tables).
 - **Player**: play, step, scrub a timeline banded by operation with findings marked, at up to 500× machine time,
   beside the posted G-code (the current line follows playback; click a line to go to its move). The stock shows each
   tool's own profile swept through the moves on a fine grid; camlib's own check grid is a toggle away.

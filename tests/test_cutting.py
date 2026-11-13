@@ -3,9 +3,15 @@ camlib's QtPlasmaC post) released, its kerfs in the playback stream's stock, wha
 and what camlib and the helpers refuse."""
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
-from camlib_ui import stream
+from camlib_ui import forms, stream
 
 from conftest import build, needs_posts, variant
 
@@ -135,3 +141,35 @@ def test_the_shops_table_and_recipe_map_to_camlibs_torch():
     d = model.definition
     assert d["processes"] == ["plasma"] and d["cutting_heads"][0]["attachment"] == "head_mount"
     assert [n["limits"]["maximum"] for n in d["nodes"][1:]] == [1300, 650, 0]
+
+
+@needs_posts
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node isn't installed")
+def test_the_cutting_forms_read_write_and_build(client, tmp_path):
+    """web/tests/thermal.test.ts on the sheet example: the cut reads into its form through its `**plan` and the shop's
+    recipe; with micro-joints added, and with a mark added before it, camlib builds and releases what the forms wrote."""
+    root = Path(__file__).resolve().parent.parent
+    code = (root / "camlib_ui" / "examples" / "sheet" / "program.py").read_text()
+    (tmp_path / "input.json").write_text(json.dumps({"code": code, "outline": forms.outline(code), "fields": forms.operation_fields()}))
+    out = tmp_path / "out"
+    out.mkdir()
+    run = subprocess.run(["node", "--test", "tests/thermal.test.ts"], cwd=root / "web", capture_output=True, text=True, timeout=120,
+                         env={**os.environ, "CAMLIB_UI_THERMAL": str(tmp_path / "input.json"), "CAMLIB_UI_FORMS_OUT": str(out)})
+    assert run.returncode == 0, run.stdout[-4000:] + run.stderr[-4000:]
+    assert "✔ the sheet program’s cut read, edited and written back" in run.stdout
+    for name in ("joints", "marked"):
+        text = (out / f"{name}.py").read_text()
+        if name == "marked":
+            # How this machine marks is its own (QtPlasmaC: two entries of its material file); the program states it.
+            assert "blend_mm=0.005)" in text
+            unmarked = variant(client, "sheet_form_unmarked", "sheet", lambda _old, text=text: text)
+            assert "declares no marking" in json.dumps(unmarked)
+            text = text.replace("blend_mm=0.005)", "blend_mm=0.005, mark_material=2, cut_material=1, material_wait_s=2)")
+        built = variant(client, f"sheet_form_{name}", "sheet", lambda _old, text=text: text)
+        assert built["status"] == "done" and built["ok"], f"{name}:\n{built.get('program_error')}"
+        assert built["released"] == 1 and built["refused"] == 0, f"{name}: {json.dumps(built['metadata']['setups'][0]['machines'], indent=1)[:3000]}"
+        operations = built["metadata"]["setups"][0]["operations"]
+        if name == "joints":
+            assert operations[0]["report"]["micro_joints"] > 0
+        else:
+            assert [op["id"] for op in operations] == ["mark", "cut"]

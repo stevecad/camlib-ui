@@ -26,7 +26,9 @@ OPERATIONS = ("Facing", "Pocket", "RestPocket", "AdaptivePocket", "Roughing", "R
               "Trace", "TrochoidalSlot", "Drilling", "Bore", "Reaming", "Tapping", "ThreadMilling", "Parallel", "Waterline",
               "Flat", "Scallop", "Pencil", "Spiral", "Radial", "Project", "Morph")
 OPTIONS = ("HelicalEntry", "StockEdgeEntry", "RampEntry", "RasterClearing", "OffsetClearing", "AdaptiveClearing", "Tabs", "FineBore",
-           "TraceSideOffset")
+           "TraceSideOffset", "SmallHoles", "MicroJoints", "CommonLine")
+# camlib's plasma and laser operations (a sheet setup's), which the forms write too.
+THERMAL = ("ThermalCut", "ThermalMark")
 # camlib's turning operations (camlib.turning: a lathe setup's), which the forms write too.
 TURNING = ("TurnFace", "TurnRough", "TurnFinish", "TurnGroove", "TurnPartOff", "TurnThread", "TurnDrill", "TurnBoreRough",
            "TurnBoreFinish", "TurnFaceGroove")
@@ -219,7 +221,7 @@ def operation_fields() -> dict:
     import camlib.operations as operations
     import camlib.turning as turning
     out = {}
-    for name in (*OPERATIONS, *OPTIONS, *TURNING):
+    for name in (*OPERATIONS, *OPTIONS, *THERMAL, *TURNING):
         cls = getattr(turning if name in TURNING else operations, name, None)
         if cls is None or not dataclasses.is_dataclass(cls):
             continue

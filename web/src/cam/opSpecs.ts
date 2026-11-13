@@ -31,7 +31,7 @@ export function turningToolType(insert: string | undefined, side: string | undef
  */
 export type GeometryKind = 'region' | 'surface' | 'holes' | 'paths' | 'path' | 'point';
 
-export type Group = '2D' | 'Holes' | '3D' | 'Turning';
+export type Group = '2D' | 'Holes' | '3D' | 'Turning' | 'Cutting';
 
 export interface OpSpec {
   cls: string;
@@ -47,7 +47,18 @@ export interface OpSpec {
   prefix: string;
   /** A lathe setup's operation (camlib.turning): its tool is a turret tool named by its id, with no geometry to pick. */
   turning?: boolean;
+  /**
+   * A sheet setup's operation (plasma, laser): its tool is the setup's cutting head (the program's head(shop.<machine>,
+   * shop.<recipe>)), its parts a flat region the program makes (a PlanarRegion, a nest's region).
+   */
+  thermal?: boolean;
 }
+
+/** What a setup machines, and so which operations it takes. */
+export type SetupKind = 'mill' | 'lathe' | 'sheet';
+export const kindOfSpec = (spec: OpSpec | undefined): SetupKind => (spec?.turning ? 'lathe' : spec?.thermal ? 'sheet' : 'mill');
+export const KIND_NAMES: Record<SetupKind, string> = { mill: 'a milling setup', lathe: 'a lathe setup', sheet: 'a plasma or laser setup' };
+export const KIND_OPS: Record<SetupKind, string> = { mill: 'milling', lathe: 'turning', sheet: 'cutting' };
 
 const MILLS: CutterType[] = ['flat_end_mill', 'bull_end_mill', 'face_mill'];
 const BALL: CutterType[] = ['ball_end_mill'];
@@ -89,6 +100,9 @@ export const OP_SPECS: OpSpec[] = [
   { cls: 'TurnBoreRough', label: 'Bore rough', group: 'Turning', prefix: 'bore_rough', turning: true, cutters: ['turn_inner'], geometry: {}, about: 'Open the hole already there in axial passes, up to the bore less an allowance.' },
   { cls: 'TurnBoreFinish', label: 'Bore finish', group: 'Turning', prefix: 'bore_finish', turning: true, cutters: ['turn_inner'], geometry: {}, about: 'Follow the bore from the front face to a Z, arcs as arcs.' },
   { cls: 'TurnFaceGroove', label: 'Face groove', group: 'Turning', prefix: 'face_groove', turning: true, cutters: ['face_groove'], geometry: {}, about: 'Axial plunges across an annular groove in the front face (declared on the setup: face_grooves).' },
+  // Sheet setups (plasma, laser): the head and its cut chart are the shop's, the parts a flat region of the program.
+  { cls: 'ThermalCut', label: 'Cut', group: 'Cutting', prefix: 'cut', thermal: true, cutters: [], geometry: {}, about: 'Cut the parts out of the sheet: holes before outlines, the kerf beside the part, each loop pierced in the scrap and entered over a lead. Feed, heights, pierce and leads are the shop’s cutting recipe.' },
+  { cls: 'ThermalMark', label: 'Mark', group: 'Cutting', prefix: 'mark', thermal: true, cutters: [], geometry: {}, about: 'Trace lines on the sheet’s surface without cutting through (part numbers, bend lines), before the parts are cut. The machine’s post must say how it marks.' },
 ];
 
 export const OP_BY_CLASS: Record<string, OpSpec> = Object.fromEntries(OP_SPECS.map((spec) => [spec.cls, spec]));
@@ -106,6 +120,9 @@ export const NESTED: Record<string, NestedChoice> = {
   tabs: { classes: ['Tabs'], label: () => 'Tabs', none: 'No tabs' },
   fine_bore: { classes: ['FineBore'], label: () => 'Fine bore', none: 'Off' },
   helix: { classes: ['HelicalEntry'], label: () => 'Helix', none: 'Outside the stock only' },
+  small_holes: { classes: ['SmallHoles'], label: () => 'Slower, height control off', none: 'Cut like the rest' },
+  micro_joints: { classes: ['MicroJoints'], label: () => 'Leave bridges', none: 'None' },
+  common_line: { classes: ['CommonLine'], label: () => 'Share one cut', none: 'Off' },
 };
 
 /**
@@ -210,8 +227,10 @@ export const FIELD_VIEW: Record<string, FieldView> = {
 
 /** Fields a form never shows: written from the tool and the setup (slot() and the setup's work offset). */
 export const HIDDEN = new Set(['id', 'tool', 'tool_number', 'length_register', 'work_offset']);
+/** A sheet operation's parts are chosen with its head, above the sections. */
+export const THERMAL_HIDDEN = new Set([...HIDDEN, 'parts']);
 
-export type Kind = 'number' | 'integer' | 'bool' | 'choice' | 'text' | 'point' | 'points' | 'geometry' | 'nested';
+export type Kind = 'number' | 'integer' | 'bool' | 'choice' | 'text' | 'point' | 'points' | 'lines' | 'geometry' | 'nested';
 /** Fields holding a list of (x, y) points. */
 const POINT_LISTS = new Set(['positions_mm']);
 
@@ -250,6 +269,40 @@ const kindOf = (name: string, type: string, geometry: GeometryKind | undefined):
   return 'text';
 };
 
+/**
+ * A ThermalCut's fields the shop's cutting recipe gives (camlib_ui.program.cutting(recipe, machine, ...)): a form doesn't
+ * show them, the cut chart is the shop's. `lead_in` and `lead_out` are the recipe's lengths with the arc radii below.
+ */
+export const RECIPE_FIELDS = new Set(['feed_mm_min', 'cut_height_mm', 'lead_in', 'lead_out', 'pierce_height_mm', 'travel_height_mm', 'pierce_delay_s', 'power_percent', 'pierce_clearance_mm']);
+/** cutting()'s own arguments, shown as the cut's fields: [name, type, default, keyword only]. */
+const CUTTING_ARGUMENTS: CamlibField[] = [['lead_in_radius_mm', 'float', null, true], ['lead_out_radius_mm', 'float', null, true]];
+export const CUTTING_KEYS = ['height_mode', 'lead_in_radius_mm', 'lead_out_radius_mm'];
+
+/** How a plasma or laser operation shows its fields. */
+const THERMAL_VIEW: Record<string, FieldView> = {
+  height_mode: v('Heights', 'heights', undefined, 'The controller’s: the program keeps one Z and the controller sets the height itself. In the program: the program moves Z to its own heights (a cut’s are the recipe’s).', [['fixed', 'The controller’s'], ['program', 'In the program']]),
+  lead_in_radius_mm: v('Lead-in arc radius', 'passes', MM, 'The arc a cut is entered over, after the recipe’s straight lead-in (0: straight only).'),
+  lead_out_radius_mm: v('Lead-out arc radius', 'passes', MM, 'The arc a cut is left over, before the recipe’s straight lead-out (0: straight only).'),
+  overcut_mm: v('Overcut', 'passes', MM, 'How far a loop’s cut runs past its start. Negative: it stops that far short (holes).'),
+  reverse: v('Reverse direction', 'passes'),
+  height_control: v('Torch height control', 'options', undefined, 'On for each loop (never over leads, nor in small holes).'),
+  small_holes: v('Small holes', 'options'), micro_joints: v('Micro-joints', 'options'), common_line: v('Common lines', 'options'),
+  compensation: v('Kerf compensation', 'options', undefined, 'Wear: posted with G41/G42, so the kerf is trimmed at the controller.', [['computer', 'In the program'], ['wear', 'Wear (G41/G42)']]),
+  plunge_mm_min: v('Plunge feed', 'advanced', FEED, 'With heights in the program: the feed down to the pierce and cut heights.'),
+  feed_percent: v('Feed', 'options', '%', 'Of the cut’s feed.'), max_diameter_mm: v('Up to diameter', 'options', MM, 'Empty: 1.5 × the sheet’s thickness.'),
+  height_control_off: v('Height control off', 'options'), holes: v('On holes too', 'options'), min_length_mm: v('Shortest shared edge', 'options', MM),
+  width_mm: v('Width', 'options', MM), count: v('Per outline', 'options'), spacing_mm: v('Or one every', 'options', MM),
+  // Marking
+  paths: v('Lines', 'geometry', MM, 'One line per row, as its points on the sheet: (x, y), (x, y), …'),
+  feed_mm_min: v('Feed', 'cutting', FEED), mark_height_mm: v('Mark height', 'heights', MM, 'The nozzle above the sheet’s top.'),
+  travel_height_mm: v('Travel height', 'heights', MM, 'With heights in the program: between lines.'),
+  power_percent: v('Power', 'cutting', '%', 'A laser’s marking power. A plasma torch marks at the current its controller’s marking process sets.'),
+  mark_width_mm: v('Mark width', 'cutting', MM, 'The width of the marked line in this material.'),
+  edge_clearance_mm: v('Clearance to edges', 'options', MM, 'Material kept between a mark and its part’s edges.'),
+  allow_off_part: v('Allow marks off the parts', 'options', undefined, 'Skips the proof that every mark is inside one part (marks on the scrap); the result says so.'),
+};
+const THERMAL_OPTIONS = new Set(['SmallHoles', 'MicroJoints', 'CommonLine']);
+
 /** How a turning operation shows fields whose names milling uses for something else. */
 const TURNING_VIEW: Record<string, FieldView> = {
   inner_radius_mm: v('Inner radius', 'heights', MM), outer_radius_mm: v('Outer radius', 'heights', MM), bottom_z_mm: v('Bottom Z', 'heights', MM),
@@ -260,10 +313,14 @@ const TURNING_VIEW: Record<string, FieldView> = {
 /** A camlib class's fields as the form shows them (an operation's, or an option object's). */
 export function fieldsOf(cls: string): FieldInfo[] {
   const spec = OP_BY_CLASS[cls];
-  return (FIELDS[cls] ?? []).map(([key, type, initial], index) => {
+  const thermal = !!spec?.thermal || THERMAL_OPTIONS.has(cls);
+  // A cut's process values are the shop's recipe (cutting(...)), whose own arguments stand in for them.
+  const own = cls === 'ThermalCut' ? [...(FIELDS[cls] ?? []).filter(([key]) => !RECIPE_FIELDS.has(key)), ...CUTTING_ARGUMENTS] : FIELDS[cls] ?? [];
+  return own.map(([key, type, initial], index) => {
     const geometry = spec?.geometry[key];
-    const view = (spec?.turning ? TURNING_VIEW[key] : undefined) ?? FIELD_VIEW[key] ?? v(key, 'advanced');
-    return { ...view, key, kind: kindOf(key, type, geometry), required: initial === null, initial, optional: type.endsWith('| None') || initial === 'None', geometry, index };
+    const view = (spec?.turning ? TURNING_VIEW[key] : thermal ? THERMAL_VIEW[key] : undefined) ?? FIELD_VIEW[key] ?? v(key, 'advanced');
+    const kind = thermal && key === 'paths' ? 'lines' : thermal && view.choices ? 'choice' : kindOf(key, type, geometry);
+    return { ...view, key, kind, required: initial === null, initial, optional: type.endsWith('| None') || initial === 'None', geometry, index };
   });
 }
 
