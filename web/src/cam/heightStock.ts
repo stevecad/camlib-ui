@@ -244,6 +244,18 @@ function makeMaterial(part: Part, uniforms: Uniforms) {
   return material;
 }
 
+/** A plain material with a part's shape (made in the vertex shader), for the section view's stencil writers. */
+function makeShapeMaterial(part: Part, uniforms: Uniforms) {
+  const material = new THREE.MeshBasicMaterial();
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.defines = { ...shader.defines, [`HF_${part.toUpperCase()}`]: '' };
+    shader.vertexShader = VERTEX_HEAD + shader.vertexShader.replace('#include <begin_vertex>', `${NORMAL_CODE[part]}\n  vec3 transformed = hfPos;`);
+  };
+  material.customProgramCacheKey = () => `camlib-ui-heightfield-shape-${part}`;
+  return material;
+}
+
 /** The top grid: one tile of TILE × TILE quads (vertex coordinates in texel steps), instanced over the field. */
 function gridGeometry(field: FieldGrid, step: number) {
   const tile = new THREE.PlaneGeometry(TILE, TILE, TILE, TILE);
@@ -329,6 +341,9 @@ export class HeightStockView {
       mesh.frustumCulled = false;
       mesh.raycast = () => {};
       mesh.userData.stockField = part;
+      // Top, walls and bottom close a solid: the section view caps its cut.
+      mesh.userData.solid = true;
+      mesh.userData.stencilMaterial = () => makeShapeMaterial(part, uniforms);
       this.group.add(mesh);
     });
   }

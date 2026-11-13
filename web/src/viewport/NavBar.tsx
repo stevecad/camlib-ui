@@ -3,7 +3,8 @@
  * grid and origin, perspective or orthographic, keep Z up, and the shortcuts and navigation settings.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Box, ChevronDown, Focus, Grid3x3, Keyboard, Move3d, Settings } from 'lucide-react';
+import * as THREE from 'three';
+import { Box, ChevronDown, Focus, Grid3x3, Keyboard, Move3d, Scissors, Settings } from 'lucide-react';
 import { displayShortcut, runCommand } from '../commands';
 import { useApp } from '../state';
 import { useSetting } from '../settings';
@@ -49,8 +50,16 @@ function Item({ label, shortcut, checked, onSelect }: { label: string; shortcut?
   );
 }
 
+/** Whether a cut along an axis is flipped so the half taken away is the one towards the camera: the cut face is what's seen. */
+function flipFor(axis: 'x' | 'y' | 'z') {
+  if (!viewer.camera) return false;
+  const away = viewer.camera.getWorldDirection(new THREE.Vector3());
+  return away[axis] > 0;
+}
+
 export default function NavBar({ disabled }: { disabled: boolean }) {
-  const { view, style, projection, showGrid, showOrigin } = useView();
+  const { view, style, projection, showGrid, showOrigin, section } = useView();
+  const cut = (patch: Partial<typeof section>) => useView.setState({ section: { ...section, ...patch } });
   const lockZUp = useSetting('viewport.lockZUp');
   return (
     <div className="navbar" role="toolbar" aria-label="View tools" data-disabled={disabled || undefined} id="navbar">
@@ -75,6 +84,16 @@ export default function NavBar({ disabled }: { disabled: boolean }) {
       <button type="button" className="nav-button nav-text" data-on={projection === 'perspective' || undefined} id="projection"
         title="Toggle between orthographic and perspective projection (P)" onClick={() => runCommand('view.projection')}>{projection === 'orthographic' ? 'Ortho' : 'Persp'}</button>
       <button type="button" className="nav-button" data-on={lockZUp || undefined} title="Keep Z up when orbiting (U)" aria-label="Keep Z up when orbiting" id="lock-z" onClick={() => runCommand('view.lockZUp')}><Move3d size={16} /></button>
+      <button type="button" className="nav-button" data-on={section.enabled || undefined} title="Section view: cut everything shown with a plane; drag the plane to move it"
+        aria-label="Section view" aria-pressed={section.enabled} id="section" onClick={() => cut(section.enabled ? { enabled: false } : { enabled: true, flip: flipFor(section.axis) })}><Scissors size={16} /></button>
+      {section.enabled && <>
+        {(['x', 'y', 'z'] as const).map((axis) => (
+          <button key={axis} type="button" className="nav-button nav-axis" data-on={section.axis === axis || undefined} aria-pressed={section.axis === axis}
+            title={`Cut along ${axis.toUpperCase()}`} id={`section-${axis}`} onClick={() => cut({ axis, offset: 0.5, flip: flipFor(axis) })}>{axis.toUpperCase()}</button>
+        ))}
+        <button type="button" className="nav-button nav-text" data-on={section.flip || undefined} aria-pressed={section.flip} title="Show the other side of the cut" id="section-flip"
+          onClick={() => cut({ flip: !section.flip })}>Flip</button>
+      </>}
       <span className="nav-sep" />
       <button type="button" className="nav-button" title="Navigation settings (Mod+,)" aria-label="Navigation settings" onClick={() => useApp.setState({ dialog: 'settings' })}><Settings size={16} /></button>
       <button type="button" className="nav-button" title="Keyboard and mouse (?)" aria-label="Keyboard and mouse" onClick={() => useApp.setState({ dialog: 'shortcuts' })}><Keyboard size={16} /></button>

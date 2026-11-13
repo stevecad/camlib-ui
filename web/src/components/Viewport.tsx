@@ -22,6 +22,7 @@ import { fieldGrid, HeightStockView } from '../cam/heightStock';
 import { findingMove, severityOf, simPlan, simPosition, toolProfile, type SimPlan } from '../cam/playback';
 import type { SimReply, SimRequest } from '../cam/stockSim.worker';
 import { isTurned } from '../cam/stream';
+import SectionLayer from '../viewport/SectionLayer';
 import { TurnedBar, TurnedStock, TurningTool } from './TurningView';
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -101,7 +102,7 @@ function PartView({ mesh, translucent }: { mesh: PartMesh; translucent: boolean 
   return (
     <group>
       <mesh geometry={geometry} onPointerDown={(event) => { down.current = [event.nativeEvent.clientX, event.nativeEvent.clientY]; }} onClick={click} renderOrder={seeThrough ? 6 : 0}
-        visible={faces} userData={{ surface: true }}>
+        visible={faces} userData={{ surface: true, solid: true }}>
         <meshStandardMaterial color="#8aa4c8" metalness={0.15} roughness={0.6} transparent={seeThrough} opacity={seeThrough ? 0.28 : 1} depthWrite={!seeThrough}
           colorWrite={style !== 'hidden-line'} polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} side={THREE.DoubleSide} />
       </mesh>
@@ -281,10 +282,13 @@ varying vec3 vColor;
 varying float vMove;
 varying float vKind;
 varying float vDist;
+#include <clipping_planes_pars_vertex>
 void main() {
   vColor = uColors[int(aKind + 0.5)];
   vMove = aMove; vKind = aKind; vDist = aDist;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+  #include <clipping_planes_vertex>
 }`;
 const FRAGMENT = /* glsl */ `
 uniform float uPosition;
@@ -293,7 +297,9 @@ varying vec3 vColor;
 varying float vMove;
 varying float vKind;
 varying float vDist;
+#include <clipping_planes_pars_fragment>
 void main() {
+  #include <clipping_planes_fragment>
   // Rapids and retracts are dashed.
   if ((vKind < 0.5 || vKind > 4.5) && mod(vDist, uDash * 2.0) > uDash) discard;
   float played = step(vMove, uPosition - 1e-4);
@@ -317,7 +323,7 @@ function Toolpath({ motion, owners, hidden }: { motion: Motion; owners: Uint32Ar
     geometry.setAttribute('aDist', new THREE.BufferAttribute(dists, 1));
     geometry.computeBoundingSphere();
     const material = new THREE.ShaderMaterial({
-      vertexShader: VERTEX, fragmentShader: FRAGMENT, transparent: true, depthWrite: false,
+      vertexShader: VERTEX, fragmentShader: FRAGMENT, transparent: true, depthWrite: false, clipping: true,  // The section view cuts it.
       uniforms: { uPosition: { value: usePlayer.getState().position }, uDash: { value: 1.2 }, uColors: { value: MOVE_KINDS.map((kind) => new THREE.Color(KIND_COLORS[kind])) } },
     });
     // A material list makes three.js draw the geometry's groups, and only them.
@@ -493,15 +499,15 @@ export default function Viewport() {
   const hidden = useMemo(() => hiddenOwners(source?.header.operations.map((op) => op.id) ?? [], hiddenIds), [source, hiddenIds]);
   return (
     <div className="viewport" id="viewport">
-      <Canvas frameloop="demand" dpr={[1, 2]} gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }} camera={{ position: [240, -240, 200], up: [0, 0, 1], near: 0.1, far: 100000 }}
+      <Canvas frameloop="demand" dpr={[1, 2]} gl={{ antialias: true, alpha: true, stencil: true, powerPreference: 'high-performance' }} camera={{ position: [240, -240, 200], up: [0, 0, 1], near: 0.1, far: 100000 }}
         onPointerMissed={(event) => { if (event.button === 0) useApp.setState({ picked: null }); }}>
         <CameraRig />
         <Interaction />
         <SurfaceProbe />
         <hemisphereLight args={['#dfe8ff', '#30363b', 0.9]} />
         <directionalLight position={[200, -300, 500]} intensity={0.6} />
-        {view.showGrid && <gridHelper args={[1000, 100, '#3a4349', '#262c31']} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, (box?.min.z ?? 0) - 0.01]} raycast={() => null} />}
-        {view.showOrigin && <WorkTriad size={Math.max(5, size * 0.12)} />}
+        {view.showGrid && <gridHelper args={[1000, 100, '#3a4349', '#262c31']} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, (box?.min.z ?? 0) - 0.01]} raycast={() => null} userData={{ uncut: true }} />}
+        {view.showOrigin && <group userData={{ uncut: true }}><WorkTriad size={Math.max(5, size * 0.12)} /></group>}
         {part.mesh && (formOpen || (!view.partHidden && (show.part || !source))) && <PartView mesh={part.mesh} translucent={!!source && !formOpen} />}
         {setup && !streaming && (setup.stock?.kind === 'turned' ? <TurnedBar stock={setup.stock} /> : <StockBox setup={setup} />)}
         {source && streaming && (turned
@@ -514,6 +520,7 @@ export default function Viewport() {
         {source && show.toolpath && !formOpen && <Toolpath motion={source.motion} owners={source.owners} hidden={hidden} />}
         {source && show.tool && !formOpen && (source.header.tools.some((tool) => tool.turning) ? <TurningTool source={source} /> : <Tool source={source} />)}
         {source && !formOpen && machineResult && machineResult.findings.some((finding) => finding.move != null) && <FindingMarks source={source} machine={machineResult} size={size} hidden={hidden} />}
+        {box && <SectionLayer box={box} />}
       </Canvas>
       <ViewCube disabled={!box} />
       <NavBar disabled={!box} />

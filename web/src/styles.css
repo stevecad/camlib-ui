@@ -331,6 +331,7 @@ input:focus, select:focus { outline: none; border-color: var(--amber); }
 .nav-button { display: inline-flex; align-items: center; gap: 2px; height: 28px; min-width: 28px; padding: 0 6px; border: none; border-radius: var(--r-md); background: transparent; color: var(--text-2); cursor: pointer; }
 .nav-button:hover { background: var(--bg-4); color: var(--text-1); }
 .nav-button[data-on] { background: var(--amber-soft); color: var(--amber); }
+.nav-axis { font-size: 11.5px; font-weight: 600; justify-content: center; }
 .nav-text { font-size: 11.5px; font-weight: 600; min-width: 44px; justify-content: center; }
 .nav-sep { width: 1px; height: 18px; background: var(--line-3); margin: 0 3px; }
 .nav-menu { position: relative; }

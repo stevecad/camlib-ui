@@ -12,9 +12,12 @@ export type StandardView = 'iso' | 'top' | 'bottom' | 'front' | 'back' | 'right'
 export type Projection = 'perspective' | 'orthographic';
 export type DisplayStyle = 'shaded-edges' | 'shaded' | 'hidden-line' | 'wireframe' | 'xray';
 
+/** The section view: a plane along `axis` at `offset` (0..1 of what's shown), keeping the far side unless flipped. */
+export type SectionState = { enabled: boolean; axis: 'x' | 'y' | 'z'; offset: number; flip: boolean };
+
 /** `partHidden`: the browser's eye on the part (fixtures have the player's, shared with its Fixtures toggle). */
-export const useView = create<{ view: StandardView | null; projection: Projection; style: DisplayStyle; showGrid: boolean; showOrigin: boolean; partHidden: boolean }>(() => ({
-  view: 'iso', projection: 'perspective', style: 'shaded-edges', showGrid: true, showOrigin: true, partHidden: false,
+export const useView = create<{ view: StandardView | null; projection: Projection; style: DisplayStyle; showGrid: boolean; showOrigin: boolean; partHidden: boolean; section: SectionState }>(() => ({
+  view: 'iso', projection: 'perspective', style: 'shaded-edges', showGrid: true, showOrigin: true, partHidden: false, section: { enabled: false, axis: 'y', offset: 0.5, flip: false },
 }));
 const setView = (patch: Partial<ReturnType<typeof useView.getState>>) => useView.setState(patch);
 
@@ -61,6 +64,10 @@ class Viewer {
   /** The point of what's shown under a canvas point (-1..1), or null: the viewport sets it (orbit pivot, pan depth, zoom to). */
   surfacePoint: (ndc: THREE.Vector2) => THREE.Vector3 | null = () => null;
   invalidate: () => void = () => {};
+  /** The section view's plane, shared by every material it cuts (SectionLayer keeps it current). */
+  readonly sectionPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+  /** True while the pointer is over the section plane (a drag there moves the plane, not the camera). */
+  sectionHot = false;
   private listeners = new Set<CameraListener>();
 
   onCamera(listener: CameraListener) {

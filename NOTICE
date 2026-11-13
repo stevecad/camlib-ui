@@ -31,6 +31,13 @@ Third-party material included in this product:
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
+- The section view (web/src/viewport/SectionLayer.tsx: the cut's hatched caps,
+  its plane and handle, and dragging it) is adapted from Steve
+  (https://github.com/stevecad/steve, cad-web/src/viewport/SectionLayer.tsx and
+  dragStep.ts), Copyright 2026 10-X-eng and Steve contributors, under the
+  Apache License, Version 2.0 (see LICENSE). It was changed to cut every
+  object in the scene and to cap the stock as it is being cut.
+
 - The built interface bundles the Inter and JetBrains Mono typefaces
   (Copyright 2016 The Inter Project Authors, https://github.com/rsms/inter;
   Copyright 2020 The JetBrains Mono Project Authors,

@@ -156,7 +156,7 @@ export function TurnedStock({ source, mode, spin, chuck }: {
   const clear = mode === 'translucent';
   return (
     <group ref={turning}>
-      <mesh geometry={geometry} renderOrder={clear ? 9 : 2} raycast={() => {}}>
+      <mesh geometry={geometry} renderOrder={clear ? 9 : 2} raycast={() => {}} userData={{ solid: true }}>
         <meshStandardMaterial color="#b4bec8" metalness={0.55} roughness={0.42} transparent={clear} opacity={clear ? 0.35 : 1} depthWrite={!clear} side={THREE.DoubleSide} />
       </mesh>
       {seams.map((points, k) => points.length > 1 && <Line key={k} points={points} color="#59636b" lineWidth={1} transparent opacity={0.7} renderOrder={3} />)}

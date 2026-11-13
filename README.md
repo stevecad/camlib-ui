@@ -40,7 +40,9 @@ plasma cutting program in Python, build it, see what camlib planned, checked and
 - **3D view** in work coordinates, navigated as in STEVE Studio (view cube, standard views, mouse styles of STEVE,
   SOLIDWORKS, Fusion and Onshape, the command palette on <kbd>Ctrl</kbd>+<kbd>K</kbd>, every shortcut on
   <kbd>?</kbd>): the part (click a face for its name), the stock as cut at any move, the toolpath coloured by move
-  kind, the tool and its holder, the fixtures the program placed. The eye on an operation's row in the browser hides
+  kind, the tool and its holder, the fixtures the program placed. The scissors in the view bar turn on a **section
+  view**: a plane along X, Y or Z cuts everything shown, the cut through the stock and the part is hatched, and the
+  plane is dragged along its axis (Flip shows the other side). The eye on an operation's row in the browser hides
   or shows that operation's toolpath (<kbd>Alt</kbd>+click shows only that one, and again puts the others back; a
   setup's eye does all of its operations). The moves between operations go with the operation they lead to. It is a
   display choice, kept per project: the playback, the tool and the stock still run every operation.
