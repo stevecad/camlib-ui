@@ -71,10 +71,9 @@ Status words: **there** (on this branch, tested), **partly**, **missing**.
 
 - **Parts**: flat parts as camlib `PlanarRegion`s: from a part's flat face (`region(part, "top")`, already there) or
   written as `Boundary` polygons and circles in the program. No part file is needed.
-- **Shop**: a table model with a cutting head (`cutting_heads`: process, nozzle and body sizes, a laser's
-  `max_power_w`), a plasma or laser `Controller`, and a cutting recipe per material and thickness (kerf, feed, cut
-  height, pierce time and radius, leads). Today these are written as raw `MachineModel(...)` fields and
-  `Record("sheet_cutting_recipe", ...)`: no helper.
+- **Shop**: `MachineModel.table` (the head mount's travel and rate, one `CuttingHead.plasma` or `.laser`: its nozzle
+  and body, a laser's full power), a plasma or laser `Controller`, and a `CuttingRecipe` per material and thickness
+  (kerf, feed, cut height, pierce time and radius, leads). **there**
 - **Program**: `head(shop.table, shop.recipe)` (camlib `Torch`/`LaserHead` with the recipe's kerf),
   `cutting(shop.recipe, shop.table, height_mode=, lead_in_radius_mm=, lead_out_radius_mm=)` (a `ThermalCut`'s process
   values from the recipe, less what the controller owns), `camlib.Nest.for_cut(cut, sheet, parts=(NestPart(...),
@@ -84,26 +83,30 @@ Status words: **there** (on this branch, tested), **partly**, **missing**.
 - **Posts**: `qtplasmac`, `centroid_plasma`, `wincnc_plasma`, `grbl_laser` (already in `POSTS`, with what each
   controller owns: heights, pierce delay, height control).
 
-### What already works
+### What is there
 
-A plasma program written this way **builds through the interface today** (checked while writing this plan with a
-6 mm sheet, six brackets and eight washers nested by `camlib.Nest`, QtPlasmaC post: 275 moves planned, every move
-checked against the travel and the sheet, 428 lines of G-code released; a wrong work offset was refused by camlib as
-275 travel violations). `program.py` `head`, `cutting` and the beam branch of `machine`, and `build/run.py`
-`scene_of`'s tip-travel for a head, were ported with the rest. The stock is the ordinary height grid, so the playback
-shows the sheet with every kerf cut through, and the stream's `lead` moves are coloured as leads. Nothing of it is
-tested in `tests/`, there is no example and no documentation.
+The `sheet` example builds, plays back and releases G-code through the interface: a 6 mm sheet, six brackets and
+eight washers nested by `camlib.Nest`, cut with leads, a negative overcut and slower small holes, posted with
+QtPlasmaC (`tests/test_cutting.py`: the release, the G-code, the kerfs in the stream, a nest that doesn't fit, a sheet
+outside the table's travel, what the helpers refuse). The server path was already in the code this interface was
+ported from (`program.py` `head`, `cutting` and the beam branch of `machine`; `build/run.py` `scene_of`'s tip travel
+for a head) but had no shop helpers, example, test or documentation: those are P1 below, done on this branch. The
+stock is the ordinary grid, so the playback shows camlib's own sheet with every kerf cut through (a torch has no
+cutter to sweep, so the fine display stock isn't used for a sheet), and the stream's `lead` moves are drawn as leads.
+
+What a sheet project does not have yet is everything that would make it read as sheet work rather than as a flat
+milling job: a 2D view with the parts, pierces and marks, the nest's own figures, forms, and a torch drawn as one.
 
 ### Missing, in order
 
 | # | What | Server | Front end | Size |
 |---|---|---|---|---|
-| P1 | **Shop helpers and an example** `sheet`: `MachineModel.table(travel=, head=CuttingHead.plasma(...))`, `CuttingRecipe(...)`; an example with a nest of two parts, leads, small holes, QtPlasmaC; tests like `tests/test_turning.py`; docs | `shop.py` (helpers), `examples/sheet/`, `tests/test_cutting.py`, `docs/programs.md` | none to build and play it | S–M |
+| P1 | **there**: shop helpers and an example `sheet`: `MachineModel.table(travel=, head=CuttingHead.plasma(...))`, `CuttingRecipe(...)`; a nest of two parts, leads, small holes, QtPlasmaC; tests; docs | `shop.py` (helpers), `examples/sheet/`, `tests/test_cutting.py`, `docs/programs.md` | `playback.ts` `simPlan`: camlib's grid for a beam | done |
 | P2 | A **2D sheet view**: looking straight down by default for a sheet setup, the parts' outlines (kept) over the sheet, kerfs, lead-ins, pierce points marked, marks in their own colour | `build/run.py`: put the parts' regions, the nest's placements and camlib's report `order`/`pierces` into the setup's description; the stream needs a `mark` kind (camlib has it; `KINDS` maps it to "other" today) | `Viewport.tsx`: a `SheetView` (outlines as lines, pierce markers), the top view when the setup's tool is a beam; `motion.ts` `MOVE_KINDS` + a colour for `mark` | M |
 | P3 | **Nesting shown and editable**: the nest's utilisation, min distances proven by camlib's own check, unplaced parts; a form for `NestPart` quantities, rotations, spacing, margin | `forms.py`: fields of `Nest`, `NestPart`; the description carries `nest.check` | a Nest panel in the result; a nest form (`forms.ts`, `ProgramForm.tsx`) | M–L |
 | P4 | **Forms** for `ThermalCut` and `ThermalMark` (camlib's fields; `Lead`, `SmallHoles`, `MicroJoints`, `CommonLine` as option objects; parts picked as flat faces or named regions) | `forms.py` `OPERATIONS`/`OPTIONS` + thermal classes | `opSpecs.ts` specs and a `Cutting` group, `forms.ts` (a beam tool is `head(...)`, the T number and register are the operation's own, no `slot`) | M |
 | P5 | Examples that show **common-line cutting** (a row of flush rectangles), **marking** (QtPlasmaC materials, or a GRBL laser with `beam_mark="power"`), **wear compensation** (`diameter_register=`), a **laser** (GRBL, `beam_s_max`) | examples and tests only | the `mark` colour of P2 | S each |
-| P6 | The **torch drawn** as a nozzle and body (now a 1.5 mm "end mill" with a holder cylinder: `_tool_summary` reads the beam as a rotary tool), and the display stock simulation skipped for a sheet (camlib's grid is the truth: a kerf is one cell wide) | `build/run.py` `_tool_summary`: a `beam` shape with nozzle and body | `playback.ts` `toolProfile`/`simPlan`, `Viewport.tsx` `Tool` | S |
+| P6 | The **torch drawn** as a nozzle and body (now a 1.5 mm "end mill" under a holder cylinder: `_tool_summary` reads the beam as a rotary tool) | `build/run.py` `_tool_summary`: a `beam` shape with nozzle and body | `playback.ts` `toolProfile`, `Viewport.tsx` `Tool` | S |
 
 ## Milling: more examples
 
@@ -124,9 +127,10 @@ and the tests that build them:
 
 ## Order of work
 
-1. **Lathe, first increment** (this branch): shop helpers, program helpers, stage 2, the turned-stock stream, the
-   `shaft` example, the revolved stock and tool in the 3D view, forms for the ten turning operations, tests, docs.
-2. **P1** (plasma shop helpers, the `sheet` example, tests): small, because the server path already works.
+1. **Lathe, first increment** (done on this branch): shop helpers, program helpers, stage 2, the turned-stock
+   stream, the `shaft` example, the revolved stock and tool in the 3D view, forms for the ten turning operations,
+   tests, docs.
+2. **P1** (done on this branch): plasma shop helpers, the `sheet` example, tests, docs.
 3. **L4** (bushing example: drill, bore, groove) and **M2–M4** (milling examples that only need project files).
 4. **P2** (2D sheet view) and **L2** (lathe view): the two views that make the other machine types read at a glance.
 5. **L1** (lathe setup form), **P4** (cutting forms), **P3** (nesting).

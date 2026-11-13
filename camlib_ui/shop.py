@@ -679,3 +679,77 @@ def _lathe_model(cls, key: str, name: str, *, x_travel: tuple[float, float], z_t
 
 MachineModel.lathe = classmethod(_lathe_model)
 __all__ += ["TurningInsert", "TurningHolder", "TurningTool", "Turret"]
+
+
+# ---------------------------------------------------------------- plasma and laser tables
+# A cutting table in the shop: its model with its torch or laser head (MachineModel.table), and a cutting recipe per
+# material and thickness. camlib_ui.program.head() and cutting() map them to camlib's Torch or LaserHead and to a
+# ThermalCut's process values; nothing here has a default that stands in for a machine's or a cut chart's value.
+
+class CuttingHead:
+    """A table's cutting head, for MachineModel.table(head=...): what camlib checks against the work (its nozzle and
+    body, as cylinders up from the tip, mm: the maker's drawing or a measurement)."""
+
+    @staticmethod
+    def plasma(id: str, *, nozzle_diameter: float, nozzle_length: float, body_diameter: float, body_length: float) -> dict:
+        return {"id": id, "process": "plasma", "nozzle_diameter_mm": float(nozzle_diameter),
+                "nozzle_length_mm": float(nozzle_length), "body_diameter_mm": float(body_diameter),
+                "body_length_mm": float(body_length)}
+
+    @staticmethod
+    def laser(id: str, *, nozzle_diameter: float, nozzle_length: float, body_diameter: float, body_length: float,
+              max_power_w: float) -> dict:
+        """A laser head: also its full power in watts (a recipe's power is posted as a share of it)."""
+        return {"id": id, "process": "laser", "nozzle_diameter_mm": float(nozzle_diameter),
+                "nozzle_length_mm": float(nozzle_length), "body_diameter_mm": float(body_diameter),
+                "body_length_mm": float(body_length), "max_power_w": float(max_power_w)}
+
+
+def _table_model(cls, key: str, name: str, *, travel: tuple[float, float, float], head: dict, rapid: float,
+                 acceleration: float = 2000, description: str = "") -> "MachineModel":
+    """A plasma or laser table: a gantry carrying one cutting head (CuttingHead.plasma or .laser) over X, Y and Z
+    travel in mm (X 0..x, Y 0..y, Z -z..0: the head's mount at the top of its travel is machine Z 0), rapid in mm/min.
+    The travel is the head mount's; camlib checks the torch tip's (that box lowered by the head's length)."""
+    x, y, z = (float(v) for v in travel)
+    if min(x, y, z) <= 0:
+        raise ValueError("Travel must be positive in X, Y and Z (mm).")
+    if not isinstance(head, dict) or head.get("process") not in ("plasma", "laser"):
+        raise TypeError(f"Table {key}: head must be a CuttingHead.plasma(...) or CuttingHead.laser(...).")
+
+    def axis(nid, parent, direction, low, high):
+        return {"id": nid, "parent": parent, "kind": "linear", "frame": IDENTITY, "axis": direction,
+                "limits": {"unit": "mm", "minimum": low, "maximum": high, "max_velocity_per_minute": rapid,
+                           "max_acceleration_per_second2": acceleration}, "periodic": False}
+    nodes = [{"id": "base", "parent": None, "kind": "fixed", "frame": IDENTITY, "axis": None, "limits": None, "periodic": False},
+             axis("X", "base", [1.0, 0.0, 0.0], 0.0, x), axis("Y", "X", [0.0, 1.0, 0.0], 0.0, y),
+             axis("Z", "Y", [0.0, 0.0, 1.0], -z, 0.0)]
+    return cls(key, name, description=description, machine_type=f"{head['process']}_table", processes=[head["process"]],
+               nodes=nodes,
+               attachments=[{"id": "table", "node": "base", "role": "workpiece", "frame": IDENTITY, "interface": None},
+                            {"id": "head_mount", "node": "Z", "role": "tool", "frame": IDENTITY, "interface": None}],
+               cutting_heads=[{**head, "attachment": "head_mount"}], tool_change={"mode": "none", "stations": []})
+
+
+MachineModel.table = classmethod(_table_model)
+
+
+def CuttingRecipe(key: str, name: str, *, process: str, kerf: float, feed: float, cut_height: float, pierce_seconds: float,
+                  pierce_radius: float, lead_in: float, lead_out: float, pierce_height: float | None = None,
+                  clearance: float | None = None, power_w: float | None = None, **fields) -> Item:
+    """What a torch or a laser does in one material at one thickness (library kind sheet_cutting_recipe): a line of
+    its cut chart. `process` "plasma" or "laser"; the kerf it burns (mm), its feed (mm/min) and cut height (mm above
+    the sheet), how long it pierces (s) and the radius its pierce splashes (mm from the pierce point: camlib keeps
+    every pierce that far from the parts), the straight lengths of its lead in and lead out (mm). `pierce_height` and
+    `clearance` (the travel height) are needed when the program moves Z itself (height_mode "program"); `power_w` is a
+    laser's power for this cut."""
+    if process not in ("plasma", "laser"):
+        raise ValueError(f"Cutting recipe {key}: process is \"plasma\" or \"laser\".")
+    settings = {"process": process, "kerf_mm": float(kerf), "feed_mm_min": float(feed), "cut_height_mm": float(cut_height),
+                "pierce_seconds": float(pierce_seconds), "pierce_radius_mm": float(pierce_radius),
+                "lead_in_mm": float(lead_in), "lead_out_mm": float(lead_out)}
+    optional = {"pierce_height_mm": pierce_height, "clearance_mm": clearance, "power_w": power_w}
+    settings.update({k: float(v) for k, v in optional.items() if v is not None})
+    return Item(key, {"name": name, "settings": settings, **fields}, kind="sheet_cutting_recipe")
+
+
+__all__ += ["CuttingHead", "CuttingRecipe"]

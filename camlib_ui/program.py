@@ -583,6 +583,8 @@ def head(item, recipe, *, head=None):
     if not _ID.fullmatch(_head_id(entry)):
         raise ShopMappingError(f"Cutting head id {_head_id(entry)!r} isn't a camlib id.")
     _, settings = _recipe(recipe, process)
+    if not isinstance(settings.get("kerf_mm"), (int, float)):
+        raise ShopMappingError(f"Cutting recipe {recipe.key} has no kerf_mm: the head's kerf in this material.")
     make = tools.Torch if process == "plasma" else tools.LaserHead
     return make(_head_id(entry), kerf_width=float(settings["kerf_mm"]), nozzle_diameter=float(entry["nozzle_diameter_mm"]),
                 nozzle_length=float(entry["nozzle_length_mm"]), body_diameter=float(entry["body_diameter_mm"]),
@@ -609,6 +611,13 @@ def cutting(recipe, item, *, height_mode, lead_in_radius_mm, lead_out_radius_mm,
     if "heights" in owns and height_mode != "fixed":
         raise ShopMappingError(f"Post {post.name}: the controller sets the pierce and cut heights itself (its material "
                                "setup); plan with height_mode='fixed'.")
+    needed = ["feed_mm_min", "cut_height_mm", "pierce_seconds", "pierce_radius_mm", "kerf_mm", "lead_in_mm", "lead_out_mm",
+              *(["pierce_height_mm", "clearance_mm"] if height_mode == "program" else [])]
+    missing = [k for k in needed if not isinstance(s.get(k), (int, float)) or isinstance(s.get(k), bool)]
+    if missing:
+        raise ShopMappingError(f"Cutting recipe {recipe.key} has no {', '.join(missing)}"
+                               + (" (the program moves Z itself with height_mode=\"program\")" if height_mode == "program"
+                                  else "") + ": add them to the shop's recipe (the torch's cut chart); none is assumed.")
     values = dict(feed_mm_min=float(s["feed_mm_min"]), cut_height_mm=float(s["cut_height_mm"]),
                   pierce_delay_s=float(s["pierce_seconds"]),
                   pierce_clearance_mm=float(s["pierce_radius_mm"]) - float(s["kerf_mm"]) / 2,

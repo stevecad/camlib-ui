@@ -11,7 +11,8 @@ A camlib-ui project is a folder with three kinds of file:
 Anything else in the folder (helper modules, fixture bodies such as the example's `vise.py`) can be imported or
 referenced by these. The `plate` example (`camlib_ui/examples/plate/`) is a complete project; start from it. The
 `cover` example beside it shows an adaptive pocket on camlib's default planner, a ramp entry and tabs at points. The
-`shaft` example is a lathe project ([Lathes](#lathes)).
+`shaft` example is a lathe project ([Lathes](#lathes)), the `sheet` example a plasma table's
+([Plasma and laser tables](#plasma-and-laser-tables)).
 
 ## The part
 
@@ -169,7 +170,8 @@ camlib's own name. A report longer than 256 kB is cut, and says where.
 camlib refuses what it can't do exactly (an orbit radius on the planner that follows the stock, a tab point off the
 outline, a ramp with tabs): the build then shows camlib's own message, which names the value and what to change.
 
-camlib-ui builds 3-axis milling programs and lathe programs ([Lathes](#lathes)). An operation the forms have no form
+camlib-ui builds 3-axis milling programs, lathe programs ([Lathes](#lathes)) and plasma or laser cutting programs
+([Plasma and laser tables](#plasma-and-laser-tables)). An operation the forms have no form
 for (camlib's `SuppliedToolpath`, whose moves the program gives; `Deburr`; probing) is written in the code: it is built,
 checked, reported and played back like any other, and opens in the code editor. Controller posts other than LinuxCNC
 come from a camlib checkout's `examples/` folder (`--camlib-posts`).
@@ -267,3 +269,70 @@ for a mill's.
 
 The lathe **setup** itself (its bar, its chuck face, its machine) is edited in the code for now: the setup form
 writes milling setups. [machine-types.md](machine-types.md) lists what is planned.
+
+
+## Plasma and laser tables
+
+A sheet project needs no part file: its parts are flat outlines. The `sheet` example (`camlib_ui/examples/sheet/`)
+nests six brackets and eight washers on a 500 × 300 mm sheet with camlib's `Nest` and cuts them with a plasma torch,
+posted with camlib's QtPlasmaC post. Its values are example values, not a real table's or a torch maker's cut chart.
+
+**The shop** holds the table, its head and a cutting recipe per material and thickness:
+
+```python
+model = shop.add(MachineModel.table("table_model", "Example plasma table", travel=(1300, 650, 100), rapid=15000,
+                                    head=CuttingHead.plasma("torch", nozzle_diameter=12, nozzle_length=20,
+                                                            body_diameter=35, body_length=120)))
+control = shop.add(Controller("control", "LinuxCNC QtPlasmaC", dialect="linuxcnc_qtplasmac_v1", processes=("plasma",),
+                              linear_resolution_mm=0.001))
+table = shop.add(Machine("table", "Example plasma table", model=model, controller=control))
+steel6 = shop.add(CuttingRecipe("steel6", "6 mm mild steel, 45 A", process="plasma", kerf=1.5, feed=2500, cut_height=1.5,
+                                pierce_seconds=0.5, pierce_radius=2.25, lead_in=2, lead_out=1))
+```
+
+| Helper | What it is |
+|---|---|
+| `MachineModel.table(key, name, travel=(x, y, z), head=, rapid=)` | A gantry carrying one cutting head: the head mount's travel (Z from -z up to 0) and rate. |
+| `CuttingHead.plasma(id, nozzle_diameter=, nozzle_length=, body_diameter=, body_length=)`, `CuttingHead.laser(..., max_power_w=)` | The head as camlib checks it against the work: its nozzle and body. A laser's full power. |
+| `CuttingRecipe(key, name, process=, kerf=, feed=, cut_height=, pierce_seconds=, pierce_radius=, lead_in=, lead_out=, pierce_height=, clearance=, power_w=)` | A line of the cut chart: the kerf, the feed and cut height, the pierce's time and splash radius, the leads' straight lengths; the pierce and travel heights when the program moves Z itself; a laser's power. |
+
+Controllers and their posts (all from `--camlib-posts`): `linuxcnc_qtplasmac_v1` (QtPlasmaC), `centroid_plasma_v1`
+(Centroid CNC12 plasma), `wincnc_plasma_v1` (WinCNC), `grbl_laser_v1` (GRBL in laser mode; `machine(...,
+beam_s_max=<$30>)`). Each post says what its controller does itself: QtPlasmaC owns Z, the pierce height and the pierce
+delay, so its cuts are planned with `height_mode="fixed"`.
+
+**The program** is camlib's `ThermalCut` on a `Setup` whose stock is the sheet:
+
+```python
+from links import shop
+from camlib import Job, Nest, NestPart, Setup, StockSpec, ThermalCut
+from camlib.planar import Boundary, Component, PlanarRegion
+from camlib_ui.program import Program, cutting, head, machine
+
+bracket = PlanarRegion("bracket", (Component(outline, (hole, hole)),), 0)       # a part: its outline, then its holes
+torch = head(shop.table, shop.steel6)                                            # camlib's Torch, the recipe's kerf
+process = cutting(shop.steel6, shop.table, height_mode="fixed", lead_in_radius_mm=3, lead_out_radius_mm=2)
+cut = ThermalCut("cut", torch, None, tool_number=1, length_register=1, **process)
+nest = Nest.for_cut(cut, sheet, parts=(NestPart(bracket, quantity=6, rotations_deg=(0, 90)),),
+                    part_spacing_mm=3, edge_margin_mm=10, resolution_mm=1).run()
+cut = dataclasses.replace(cut, parts=nest.region)
+setup = Setup("sheet", StockSpec((0, 0, 0), (500, 300, 6), 0.5), (torch,), (cut,), (0, 0, 40), verification=...)
+program = Program(Job("sheet", "1", (setup,)), machine(shop.table, setup, work_to_machine=WorkFrame((100, 100, -190)), ...))
+```
+
+| Helper | What it gives |
+|---|---|
+| `head(shop.table, shop.recipe)` | The table's head as camlib's `Torch` or `LaserHead`: its kerf the recipe's, its nozzle and body the shop's. |
+| `cutting(shop.recipe, shop.table, height_mode=, lead_in_radius_mm=, lead_out_radius_mm=)` | A `ThermalCut`'s process values from the recipe (feed, cut height, pierce delay and clearance, leads, power), less what the controller owns. |
+| `machine(shop.table, setup, work_to_machine=, ...)` | The table as a camlib machine with its post. No `tooling=`: the one tool is the head, its T number and register the operation's. The travel checked is the torch tip's: the head mount's, lowered by the head's length. |
+
+camlib's `Nest` places the copies and proves the distances between what is cut for any two parts and to the sheet's
+edge; it refuses a nest that doesn't fit and says which part. `ThermalCut` orders the loops (holes before their
+outline), runs the kerf beside each part, places every pierce and lead in the scrap and proves them clear of every
+part before any motion; its report (the result's Operations) lists the parts, loops, pierces and the order. Leads,
+overcut, `SmallHoles`, `MicroJoints`, `CommonLine` and `ThermalMark` are camlib's (its `docs/operations.md`, "Plasma
+and laser cutting") and are written in the code.
+
+In the playback the sheet is camlib's own stock grid: every kerf is cut through it as the torch passes, lead moves are
+drawn in their own colour, and the view cube’s top view looks straight down on the sheet. The operations of a
+sheet setup are edited in the code: the forms have none for `ThermalCut` yet ([machine-types.md](machine-types.md)).

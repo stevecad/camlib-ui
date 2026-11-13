@@ -8,6 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { meshVolume, turnedBins, turnedMesh, turnedOutline } from '../src/cam/turnedStock.ts';
 import { initialGrid, volume, type StreamSetup } from '../src/cam/stream.ts';
+import { simPlan } from '../src/cam/playback.ts';
+import type { Motion } from '../src/cam/motion.ts';
 
 /** A turned stock's grid: per bin [outer lower, outer upper], then per bin [bore lower, bore upper]. */
 function grid(outer: number[], bore: number[]): Float32Array {
@@ -75,4 +77,18 @@ test('a turned stream starts as its bar and counts rings of material', () => {
   start[0] = 6; start[1] = 7;
   const [most, least] = volume(setup, start);
   assert.ok(Math.abs(most - (upper - Math.PI * (100 - 49) * 0.5)) < 1e-3 && Math.abs(least - (upper - Math.PI * (100 - 36) * 0.5)) < 1e-3);
+});
+
+test('a lathe setup and a sheet show camlib’s own stock, not a swept cutter’s', () => {
+  const motion = { first: 0, count: 0, start: [0, 0, 0], restarts: new Map(), end: new Float32Array(0), kind: new Uint8Array(0), operation: new Uint32Array(0),
+    tool: new Uint32Array(0), rpm: new Float32Array(0), feed: new Float32Array(0), line: new Uint32Array(0) } as unknown as Motion;
+  const mill = { id: 'em6', name: 'em6', shape: { kind: 'flat' }, diameter_mm: 6, cutting_length_mm: 18, overall_length_mm: 60, shank_diameter_mm: 6, flutes: 3, stickout_mm: 30,
+    gauge_length_mm: 100, holders: [{ z_min_mm: 30, z_max_mm: 100, radius_min_mm: 17, radius_max_mm: 17 }] };
+  const box = { min_mm: [0, 0, 0], max_mm: [10, 10, 5], nx: 20, ny: 20, cell_mm: [0.5, 0.5] };
+  const header = (stock: object, tools: object[]) => ({ header: { stock, tools } as unknown as StreamSetup, motion, bands: [] });
+  // A milling setup's display stock is a height field cut by its tools' profiles.
+  assert.ok(simPlan(header(box, [mill])));
+  // A torch cuts the sheet through from above it; a turned stock isn't a height field.
+  assert.equal(simPlan(header(box, [{ ...mill, shape: { kind: 'beam' } }])), null);
+  assert.equal(simPlan(header({ ...box, kind: 'turned', ny: 2, z_min_mm: -5, z_max_mm: 0, outer_radius_mm: 10, bore_radius_mm: 0 }, [{ id: 't', name: 't', turning: {} }])), null);
 });

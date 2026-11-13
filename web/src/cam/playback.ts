@@ -155,6 +155,9 @@ export function simPlan(source: { header: StreamSetup; motion: Motion; bands: Ba
   const { header, motion, bands } = source;
   // A lathe setup shows camlib's own turned stock (the stream's): there is no height field of it to cut.
   if (isTurned(header.stock) || header.tools.some((tool) => tool.turning)) return null;
+  // A torch or a laser head cuts the sheet through from above it: no cutter sweeps the stock. camlib's own grid, where
+  // every kerf is cut through, is what is shown.
+  if (header.tools.some((tool) => tool.shape?.kind === 'beam')) return null;
   const cutters: CutterProfile[] = [];
   for (const tool of header.tools) {
     const profile = profileOf([toolProfile(tool).cutter]);

@@ -1,7 +1,7 @@
 # camlib-ui
 
-A local interface for [camlib](https://github.com/stevecad/camlib), the CAM engine: write a milling or a lathe program
-in Python, build it, see what camlib planned, checked and released, play it back on the stock, and download its G-code.
+A local interface for [camlib](https://github.com/stevecad/camlib), the CAM engine: write a milling, a lathe or a
+plasma cutting program in Python, build it, see what camlib planned, checked and released, play it back on the stock, and download its G-code.
 
 > [!IMPORTANT]
 > **For demonstration purposes only.** camlib-ui shows what camlib does: it is not a CAM product, is not supported,
@@ -50,6 +50,10 @@ in Python, build it, see what camlib planned, checked and released, play it back
   the section. See
   [docs/programs.md](docs/programs.md#lathes); [docs/machine-types.md](docs/machine-types.md) says what is there for
   each machine type and what is planned.
+- **Plasma and laser tables**: a sheet project (the `sheet` example) nests flat parts on a sheet with camlib's `Nest`
+  and cuts them with a torch or a laser head (`ThermalCut`: pierces, leads and kerf paths proven clear of every part),
+  posted with camlib's QtPlasmaC, Centroid plasma, WinCNC or GRBL laser post. The playback shows the sheet with every
+  kerf cut through. See [docs/programs.md](docs/programs.md#plasma-and-laser-tables).
 - **Player**: play, step, scrub a timeline banded by operation with findings marked, at up to 500× machine time,
   beside the posted G-code (the current line follows playback; click a line to go to its move). The stock shows each
   tool's own profile swept through the moves on a fine grid; camlib's own check grid is a toggle away.
@@ -86,8 +90,9 @@ cd web && npm ci && npm run build && cd ..
 
 Then open <http://127.0.0.1:8765>. An empty projects folder is given the examples to start from: `plate` (face,
 pocket, outline and holes, in a vise), `cover` (an adaptive pocket that follows the stock, a recess entered by a
-ramp, the outline cut through with tabs at points) and `shaft` (a lathe: a bar faced, roughed, finished, threaded and
-parted off; it needs camlib's posts, below). A new project can start from any of them. Every machine, tool, speed and
+ramp, the outline cut through with tabs at points), `shaft` (a lathe: a bar faced, roughed, finished, threaded and
+parted off) and `sheet` (a plasma table: two parts nested on a sheet and cut out). `shaft` and `sheet` need camlib's
+posts (below). A new project can start from any of them. Every machine, tool, speed and
 feed in the examples is an example value, not a real machine's.
 
 `start.sh` checks that camlib-ui and camlib are installed, builds the interface if it isn't built yet, finds camlib's
@@ -134,7 +139,7 @@ cd web && npm run typecheck && npm test
 | `camlib_ui/shop.py`, `program.py`, `parts.py` | The shop as code, the program helpers, part files. |
 | `camlib_ui/stream.py`, `build/stream.py` | The playback stream's reader and writer ([docs/playback-stream.md](docs/playback-stream.md)). |
 | `camlib_ui/build/turning.py` | A lathe setup as the result and the stream describe it (the bar, the part's half-section, the tools' outlines). |
-| `camlib_ui/examples/plate/`, `cover/`, `shaft/` | The example projects (`shaft`: a lathe). |
+| `camlib_ui/examples/plate/`, `cover/`, `shaft/`, `sheet/` | The example projects (`shaft`: a lathe; `sheet`: a plasma table). |
 | `web/src/` | The interface: React, three.js (react-three-fiber), CodeMirror. |
 
 ## License
