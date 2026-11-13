@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import signal
@@ -25,6 +26,9 @@ from pathlib import Path
 
 from .build.progress import clear_progress, read_progress
 from .projects import HIDDEN, Projects
+
+# A drawing a program hands out with its build (camlib_ui.program.Program(outputs=...)).
+DRAWING = re.compile(r"[a-z0-9][a-z0-9_-]{0,40}\.dxf\Z")
 
 KEEP = 20            # builds kept per project (the newest)
 LOG_TAIL = 20000
@@ -189,7 +193,9 @@ class Builds:
         log = path / "log.txt"
         out["log"] = log.read_bytes()[-LOG_TAIL:].decode(errors="replace") if log.is_file() else ""
         files = {}
-        for name in ["cam-playback.bin", *[f"gcode-{n}.nc" for n in range(1, 33)]]:
+        # A program's own drawings (Program(outputs=...): a remnant, a nest) beside camlib's outputs.
+        drawings = sorted(p.name for p in path.glob("*.dxf") if DRAWING.fullmatch(p.name))
+        for name in ["cam-playback.bin", *[f"gcode-{n}.nc" for n in range(1, 33)], *drawings]:
             if (path / name).is_file():
                 files[name] = f"/api/projects/{project}/builds/{build}/files/{name}"
         out["files"] = files
@@ -197,8 +203,8 @@ class Builds:
 
     def file(self, project: str, build: str, name: str) -> Path:
         path = self.path(project, build)
-        if name != "cam-playback.bin" and not (name.startswith("gcode-") and name.endswith(".nc")
-                                               and name[6:-3].isdigit()):
+        if name != "cam-playback.bin" and not DRAWING.fullmatch(name) and not (
+                name.startswith("gcode-") and name.endswith(".nc") and name[6:-3].isdigit()):
             raise KeyError(name)
         target = path / name
         if not target.is_file():

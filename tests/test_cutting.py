@@ -173,3 +173,57 @@ def test_the_cutting_forms_read_write_and_build(client, tmp_path):
             assert operations[0]["report"]["micro_joints"] > 0
         else:
             assert [op["id"] for op in operations] == ["mark", "cut"]
+
+
+@needs_posts
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node isn't installed")
+def test_dxf_parts_nest_from_a_corner_and_the_remnant_comes_out(client, tmp_path):
+    """The nest example: parts read from its DXF drawing, nested, cut with rapids kept off freed parts, released; the
+    build hands out remnant.dxf, which reads back as one sheet clear of the parts. Then web/tests/nest.test.ts edits
+    the nest through its form (start corner, fill axis, a quantity, rotations) and camlib releases that too, with the
+    parts at the other end of the sheet."""
+    from camlib.dxf import read_parts
+
+    root = Path(__file__).resolve().parent.parent
+    built = build(client, "nest")   # the examples are the root's first projects
+    assert built["status"] == "done" and built["ok"], built.get("program_error")
+    assert built["released"] == 1 and built["refused"] == 0, json.dumps(built["metadata"]["setups"][0]["machines"])[:3000]
+    report = built["metadata"]["setups"][0]["operations"][0]["report"]
+    assert report["parts"] == 15 and report["part_order"] == {"kind": "spread", "min_distance_mm": 120}
+    assert report["rerouted_rapids"] >= 0 and report["min_part_step_mm"] > 0
+    assert "remnant.dxf" in built["files"]
+    (tmp_path / "remnant.dxf").write_bytes(client.get(built["files"]["remnant.dxf"]).content)
+    (remnant,) = read_parts(tmp_path / "remnant.dxf", unit_mm=1, join_tolerance_mm=1e-6)
+    xs = [v[0] for v in remnant.components[0].outer.vertices]
+    assert min(xs) >= 0 and max(xs) <= 500
+
+    code = (root / "camlib_ui" / "examples" / "nest" / "program.py").read_text()
+    (tmp_path / "input.json").write_text(json.dumps({"code": code, "outline": forms.outline(code), "fields": forms.operation_fields()}))
+    out = tmp_path / "out"
+    out.mkdir()
+    run = subprocess.run(["node", "--test", "tests/nest.test.ts"], cwd=root / "web", capture_output=True, text=True, timeout=120,
+                         env={**os.environ, "CAMLIB_UI_NEST": str(tmp_path / "input.json"), "CAMLIB_UI_FORMS_OUT": str(out)})
+    assert run.returncode == 0, run.stdout[-4000:] + run.stderr[-4000:]
+    assert "✔ the nest read, edited and written back" in run.stdout
+    text = (out / "nest_edited.py").read_text()
+    edited = variant(client, "nest_edited", "nest", lambda _old: text)
+    assert edited["status"] == "done" and edited["ok"], edited.get("program_error")
+    assert edited["released"] == 1 and edited["refused"] == 0
+    assert edited["metadata"]["setups"][0]["operations"][0]["report"]["parts"] == 14
+    (tmp_path / "edited.dxf").write_bytes(client.get(edited["files"]["remnant.dxf"]).content)
+    (left,) = read_parts(tmp_path / "edited.dxf", unit_mm=1, join_tolerance_mm=1e-6)
+
+    def free(region, p):
+        """Whether a point is in the remnant (its outline's and holes' corners as polygons)."""
+        def within(boundary):
+            inside, v = False, boundary.vertices
+            for a, b in zip(v, v[1:] + v[:1]):
+                if (a[1] > p[1]) != (b[1] > p[1]) and p[0] < a[0] + (p[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1]):
+                    inside = not inside
+            return inside
+        (component,) = region.components
+        return within(component.outer) and not any(within(hole) for hole in component.holes)
+
+    # Nested from the lower left the parts cover (40, 40) and (460, 260) is left; from the upper right it is the reverse.
+    assert not free(remnant, (40, 40)) and free(remnant, (460, 260))
+    assert free(left, (40, 40)) and not free(left, (460, 260))

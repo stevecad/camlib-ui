@@ -667,6 +667,25 @@ def build(request_path, started, log, progress=None):
         shutil.rmtree(work, ignore_errors=True)
 
 
+MAX_DRAWINGS = 8
+MAX_DRAWING_BYTES = 8 << 20
+DRAWING = re.compile(r"[a-z0-9][a-z0-9_-]{0,40}\.dxf\Z")
+
+
+def _write_drawings(data, job_dir):
+    """The program's own drawings (Program(outputs={"remnant.dxf": text})), into the build's directory as they are: text
+    the program made (a remnant, a nest), not something camlib checked."""
+    outputs = data.get("outputs") or {}
+    if not isinstance(outputs, dict) or len(outputs) > MAX_DRAWINGS:
+        raise ValueError(f"Program(outputs=...) takes at most {MAX_DRAWINGS} drawings, as a dict of name: text.")
+    for name, text in outputs.items():
+        if not isinstance(name, str) or not DRAWING.fullmatch(name):
+            raise ValueError(f"Program output {name!r}: a name is lower-case letters, digits, _ and - and ends in .dxf.")
+        if not isinstance(text, str) or len(text.encode()) > MAX_DRAWING_BYTES:
+            raise ValueError(f"Program output {name!r} must be text of at most {MAX_DRAWING_BYTES >> 20} MB.")
+        (job_dir / name).write_text(text)
+
+
 def _stage2(data, mode, clock, started, timings, work, job_dir, progress):
     """Stage 2 in its own directory `work`: stage 1's data checked and rebuilt, then planned, checked, posted and
     released by camlib; its outputs moved into the job directory."""
@@ -676,6 +695,7 @@ def _stage2(data, mode, clock, started, timings, work, job_dir, progress):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         compiled, targets, accept, notes = load_program(data)
+        _write_drawings(data, job_dir)
         job = _job(compiled)
         metadata = dict(kind="camlib", camlib=camlib_identity(), program=describe(compiled, targets, accept))
         outputs = []

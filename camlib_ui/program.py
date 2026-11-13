@@ -31,7 +31,7 @@ import importlib.util
 import math
 import re
 
-__all__ = ["solid", "face", "faces", "part_target", "region", "silhouette", "hole_centers", "surface", "paths", "path", "polyline", "tool", "slot",
+__all__ = ["solid", "face", "faces", "part_target", "region", "silhouette", "hole_centers", "surface", "paths", "path", "polyline", "dxf_parts", "tool", "slot",
            "station", "turned", "head", "cutting", "fixture", "protected", "machine", "Program", "Target", "POSTS"]
 
 _ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
@@ -199,6 +199,26 @@ def _edge_piece(link, n, edge):
             sweep = math.tau if ccw else -math.tau   # A whole circle.
         return (start.x, start.y), (end.x, end.y), (c.x, c.y), math.degrees(sweep)
     raise ValueError(f"Edge {n!r} is a {kind.lower()}: paths follow straight edges and circular arcs.")
+
+
+def dxf_parts(name, *, unit_mm, join_tolerance_mm, layers=None, ignore=()):
+    """The parts drawn in a DXF file of the project (camlib.dxf.read_parts): one PlanarRegion per closed outline, with
+    the holes drawn inside it, for camlib's NestPart. `name` is the file's name in the project. `unit_mm` (1 for a
+    drawing in millimetres, 25.4 for inches) and `join_tolerance_mm` (how far apart two ends may be and still be one
+    corner) are stated, never assumed; a spline, an open outline or a unit that disagrees with the file is refused
+    with the entity it is about."""
+    import sys
+    from pathlib import Path
+    from camlib.dxf import read_parts
+    if not isinstance(name, str) or "/" in name or "\\" in name or not name.lower().endswith(".dxf"):
+        raise ValueError(f"dxf_parts({name!r}): the name of a .dxf file in the project.")
+    # The program's own folder (a build's copy of the project).
+    folder = Path(sys._getframe(1).f_globals.get("__file__", ".")).parent
+    path = folder / name
+    if not path.is_file():
+        raise ValueError(f"The project has no file {name}: add it (Import DXF), or check the name.")
+    return read_parts(path, unit_mm=unit_mm, join_tolerance_mm=join_tolerance_mm, layers=layers, ignore=ignore,
+                      name=Path(name).stem)
 
 
 def polyline(*points):
@@ -1497,6 +1517,9 @@ class Program:
     job: object
     machines: object
     accept: frozenset = frozenset()
+    # Drawings the build hands out beside its G-code: {"remnant.dxf": text} (camlib.dxf.write_regions's text). They
+    # are the program's own; camlib-ui serves them as they are.
+    outputs: dict = field(default_factory=dict)
 
     def __post_init__(self):
         from camlib.export import accepted
@@ -1537,4 +1560,4 @@ def export_program(program):
     if not all(t for ts in targets.values() for t in ts):
         raise ValueError("Program.machines must be machine(...) results.")
     return dict(version=1, job=dict(id=compiled.id, revision=compiled.revision, setups=setups), targets=targets,
-                accept=sorted(program.accept))
+                accept=sorted(program.accept), outputs=dict(program.outputs))

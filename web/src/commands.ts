@@ -4,12 +4,12 @@
  */
 import type { ComponentType } from 'react';
 import {
-  Box, Code2, Eye, FilePlus2, FileSearch, Library, FolderOpen, Focus, Grid3x3, Hammer, Keyboard, ListChecks, Maximize2, Move3d, PanelLeft, PanelRight, Pause,
+  Box, Code2, Eye, FileInput, FileOutput, FilePlus2, FileSearch, LayoutGrid, Library, FolderOpen, Focus, Grid3x3, Hammer, Keyboard, ListChecks, Maximize2, Move3d, PanelLeft, PanelRight, Pause,
   Save, ScanSearch, Settings, SkipBack, SkipForward, Square, StepBack, StepForward,
 } from 'lucide-react';
 import * as THREE from 'three';
-import { cancelBuild, dirtyFiles, openPlayer, revealIn, running, saveAll, showAllPaths, startBuild, useApp, usePaths, usePlayer } from './state';
-import { openNewOp, openSetup, useProgram } from './cam/programEditor';
+import { cancelBuild, dirtyFiles, openPlayer, revealIn, running, saveAll, showAllPaths, startBuild, uploadFile, useApp, usePaths, usePlayer } from './state';
+import { openNest, openNewOp, openSetup, useProgram } from './cam/programEditor';
 import { availableSpecs, fieldsLoaded, KIND_NAMES, KIND_OPS, kindOfSpec, OP_SPECS, type SetupKind } from './cam/opSpecs';
 import { opIconOf, PostIcon, SetupIcon, SimulateToolIcon, ToolpathIcon } from './icons';
 import { setting, updateSetting } from './settings';
@@ -52,6 +52,23 @@ function downloadGcode() {
   const a = document.createElement('a');
   a.href = build.files[machine.gcode];
   a.download = `${build.metadata?.program.id ?? 'program'}-${setup}-${machine.machine}.nc`;
+  a.click();
+}
+/** Asks for a DXF drawing and puts it in the project (a program reads it with dxf_parts("<name>.dxf", ...)). */
+function importDxf() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.dxf';
+  input.onchange = () => { const file = input.files?.[0]; if (file) void uploadFile(file, file.name.replace(/[^A-Za-z0-9_.-]/g, '_')); };
+  input.click();
+}
+const remnantOf = () => app().build?.files['remnant.dxf'] ?? null;
+function downloadRemnant() {
+  const build = app().build, href = remnantOf();
+  if (!build || !href) return;
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = `${build.metadata?.program.id ?? 'program'}-remnant.dxf`;
   a.click();
 }
 /** The setup a new operation would go into: the one selected, or the selected operation's, else the last (null: none). */
@@ -220,6 +237,12 @@ export const commands: Command[] = [
     id: `cam.code.${spec.cls}`, label: spec.turning ? `Turning: ${spec.label.toLowerCase()}` : spec.thermal ? `Plasma/laser: ${spec.label.toLowerCase()}` : spec.label, short: spec.label, icon: opIconOf(spec.cls) as IconType, category: 'Manufacture', description: spec.about,
     run: () => void openNewOp(spec.cls), enabled: opReason(spec.cls, kindOfSpec(spec)),
   })),
+  { id: 'cam.sheet.import', label: 'Import DXF parts', short: 'Import DXF', icon: FileInput, category: 'Manufacture', run: importDxf,
+    description: 'Add a DXF drawing of flat parts to the project. The program reads it with dxf_parts("<name>.dxf", unit_mm=..., join_tolerance_mm=...): each closed outline is a part, with its holes.', enabled: needsProject },
+  { id: 'cam.sheet.nest', label: 'Nest', icon: LayoutGrid, category: 'Manufacture', run: () => void openNest(),
+    description: 'How many of each part, their rotations, the spacing and the corner the nest starts from.', enabled: needsProgram },
+  { id: 'cam.sheet.remnant', label: 'Save remnant DXF', short: 'Remnant', icon: FileOutput, category: 'Manufacture', run: downloadRemnant,
+    description: 'Download what is left of the sheet after this build’s cut (the program’s remnant.dxf): the next job’s sheet.', enabled: () => (remnantOf() ? true : 'The last build made no remnant.dxf: the program hands it out with Program(outputs={"remnant.dxf": ...}).') },
   { id: 'cam.generate', label: 'Generate toolpaths', short: 'Generate', icon: ToolpathIcon as IconType, category: 'Manufacture', run: () => { void startBuild('full'); },
     description: 'Plan every setup, check every move, post, and release the G-code camlib clears.', enabled: all(needsProgram, needsIdle) },
   { id: 'cam.simulate', label: 'Simulate', icon: SimulateToolIcon as IconType, category: 'Manufacture', run: () => void openPlayer(chosenSetup() ?? ''),

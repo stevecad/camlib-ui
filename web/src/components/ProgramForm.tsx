@@ -9,10 +9,10 @@ import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { AlertTriangle, ChevronRight, Code2, Crosshair, X } from 'lucide-react';
 import { OpIcon, SetupIcon } from '../icons';
 import { availableSpecs, fieldsOf, nestedOf, notTaken, OP_BY_CLASS, type FieldInfo, type Section as SectionKey } from '../cam/opSpecs';
-import { BAD_LINES, changesInPlace, emptyNested, linesSource, linesText, pointsSource, pointsText, type Nested, type OpDraft, type SetupDraft } from '../cam/forms';
+import { BAD_LINES, changesInPlace, emptyNested, linesSource, linesText, pointsSource, pointsText, type Nested, type NestDraft, type OpDraft, type SetupDraft } from '../cam/forms';
 import type { CamProgramModel } from '../cam/pyCode';
 import {
-  closeForm, commitForm, dialectOf, machinesOf, okProblem, openNewOp, partsChoices, presetsOf, setOpTool, shopRecord, showInCode, startPicking, toolSetupsOf, toolsOf, updateOp, updateSetup, useEditor,
+  closeForm, commitForm, dialectOf, machinesOf, okProblem, openNewOp, partsChoices, updateNest, presetsOf, setOpTool, shopRecord, showInCode, startPicking, toolSetupsOf, toolsOf, updateOp, updateSetup, useEditor,
   useProgram, useShopRecords,
 } from '../cam/programEditor';
 import { displayShortcut } from '../commands';
@@ -193,6 +193,67 @@ function ThermalHead({ draft, model }: { draft: OpDraft; model: CamProgramModel 
           options={[{ value: '', label: choices.length ? 'Choose…' : 'The program makes no region or nest' }, ...choices,
             ...(parts && !choices.some((item) => item.value === parts) ? [{ value: parts, label: `${parts} (the program’s code)` }] : [])]} />
       </Row>
+    </>
+  );
+}
+
+// ── The nest ─────────────────────────────────────────────────────────────
+
+const ROTATIONS: [string, string][] = [['(0,)', 'As drawn'], ['(0, 180)', 'As drawn or turned half round'], ['(0, 90)', 'As drawn or a quarter turn'], ['(0, 90, 180, 270)', 'Any quarter turn']];
+const CORNERS: [string, string][] = [['"lower_left"', 'Lower left'], ['"lower_right"', 'Lower right'], ['"upper_left"', 'Upper left'], ['"upper_right"', 'Upper right']];
+const AXES: [string, string][] = [['"y"', 'Columns (stack along Y, then move in X)'], ['"x"', 'Rows (stack along X, then move in Y)']];
+const normal = (src: string) => src.replace(/\s+/g, '').replace(/'/g, '"');
+
+/**
+ * A sheet program's nest (camlib's Nest.for_cut): how many of each part and the rotations it may take, the material
+ * left between cuts and to the sheet's edge, and the corner the fill starts from (the remnant is left on the far
+ * side). camlib places the copies and proves their spacing, or refuses, naming the parts that don't fit.
+ */
+function NestForm({ draft }: { draft: NestDraft }) {
+  const value = (key: string) => draft.values[key] ?? '';
+  const set = (key: string) => (src: string) => updateNest((d) => ({ ...d, values: { ...d.values, [key]: src } }));
+  const part = (i: number, patch: Partial<NestDraft['parts'][number]>) => updateNest((d) => ({ ...d, parts: d.parts.map((item, k) => (k === i ? { ...item, ...patch } : item)) }));
+  const number = (key: string, label: string, help: string) => (
+    <Row label={`${label} (mm) *`} field={key} sub={help}>
+      <input id={fieldId(key)} aria-label={label} inputMode="decimal" spellCheck={false} placeholder="required" value={value(key)} onChange={(event) => set(key)(event.target.value.trim())} />
+    </Row>
+  );
+  const choice = (key: string, label: string, options: [string, string][], initial: string, help: string) => (
+    <Row label={label} field={key} sub={help}>
+      <Select ariaLabel={label} id={fieldId(key)} value={normal(value(key)) || initial} onChange={(next) => set(key)(next === initial ? '' : next)}
+        options={[...options.map(([src, text]) => ({ value: normal(src), label: text })),
+          ...(value(key) && !options.some(([src]) => normal(src) === normal(value(key))) ? [{ value: normal(value(key)), label: `${value(key)} (the program’s code)` }] : [])]} />
+    </Row>
+  );
+  return (
+    <>
+      <p className="form-note">{`How many of each part go on the sheet${draft.sheet ? ` (${draft.sheet})` : ''}, and where the nest starts. camlib places them and proves the spacing; parts that don’t fit are refused by name.`}</p>
+      <Section title="Parts" defaultOpen id="form-section-parts">
+        {draft.parts.map((item, i) => (
+          <div className="nest-part" key={`${item.region}-${i}`} id={`nest-part-${i}`}>
+            <Row label={item.region} field={`quantity-${i}`} sub="Copies">
+              <input id={fieldId(`quantity-${i}`)} aria-label={`${item.region} quantity`} inputMode="numeric" value={item.quantity} onChange={(event) => part(i, { quantity: event.target.value.trim() })} />
+            </Row>
+            <Row label="Rotations" field={`rotations-${i}`}>
+              <Select ariaLabel={`${item.region} rotations`} id={fieldId(`rotations-${i}`)} value={normal(item.rotations)} onChange={(next) => part(i, { rotations: ROTATIONS.find(([src]) => normal(src) === next)?.[0] ?? next })}
+                options={[...ROTATIONS.map(([src, text]) => ({ value: normal(src), label: text })),
+                  ...(!ROTATIONS.some(([src]) => normal(src) === normal(item.rotations)) ? [{ value: normal(item.rotations), label: `${item.rotations} degrees` }] : [])]} />
+            </Row>
+            <Row label="May be turned over" field={`mirror-${i}`}>
+              <Segmented value={item.mirror ? 'True' : 'False'} options={[{ value: 'False', label: 'No' }, { value: 'True', label: 'Yes' }]} onChange={(next) => part(i, { mirror: next === 'True' })} />
+            </Row>
+          </div>
+        ))}
+      </Section>
+      <Section title="Spacing" defaultOpen id="form-section-spacing">
+        {number('part_spacing_mm', 'Between parts', 'Material left between what is cut for two parts (kerfs, leads and pierce craters).')}
+        {number('edge_margin_mm', 'To the sheet’s edge', 'Material left between what is cut for a part and the sheet’s outline or holes.')}
+        {number('resolution_mm', 'Placement step', 'The column spacing of the placement: finer nests tighter and takes longer.')}
+      </Section>
+      <Section title="Where it starts" defaultOpen id="form-section-start">
+        {choice('start_corner', 'Start corner', CORNERS, '"lower_left"', 'The corner of the sheet the fill starts from; the remnant is left on the far side.')}
+        {choice('fill_axis', 'Fill', AXES, '"y"', 'Which way parts are stacked from the start corner before the nest moves on.')}
+      </Section>
     </>
   );
 }
@@ -386,10 +447,10 @@ export default function ProgramForm() {
   const first = form.mode === 'first';
   const problem = okProblem(form);
   const newProgram = form.mode === 'setup' && form.newProgram;
-  const title = form.mode === 'op' ? `${form.editing ? 'Edit' : 'New'} ${OP_BY_CLASS[form.draft.cls].label.toLowerCase()}` : first ? 'First operation'
-    : newProgram ? 'New program' : form.editing ? 'Edit setup' : 'New setup';
+  const title: string = form.mode === 'op' ? `${form.editing ? 'Edit' : 'New'} ${OP_BY_CLASS[form.draft.cls].label.toLowerCase()}` : first ? 'First operation'
+    : form.mode === 'nest' ? 'Nest' : newProgram ? 'New program' : form.editing ? 'Edit setup' : 'New setup';
   const next = form.mode === 'setup' && !form.editing;
-  const okTitle = next ? 'Next: the setup’s first operation' : form.mode === 'op' ? 'Write the operation into program.py and build it' : 'Write the setup into program.py and build it';
+  const okTitle = next ? 'Next: the setup’s first operation' : form.mode === 'op' ? 'Write the operation into program.py and build it' : form.mode === 'nest' ? 'Write the nest into program.py and build it' : 'Write the setup into program.py and build it';
   const onKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
       event.stopPropagation();
@@ -407,13 +468,13 @@ export default function ProgramForm() {
         <h3>{title}</h3>
         {form.mode !== 'first' && !newProgram && (
           <button type="button" className="icon-button small" title="The program’s code" aria-label="Edit code"
-            onClick={() => { const id = form.mode === 'op' ? form.editing : form.editing; closeForm(); void showInCode(id ?? 'program'); }}><Code2 size={14} /></button>
+            onClick={() => { const id = form.mode === 'nest' ? form.draft.variable : form.editing; closeForm(); void showInCode(id ?? 'program'); }}><Code2 size={14} /></button>
         )}
         <button type="button" className="icon-button small" aria-label="Close" title="Close (Esc)" onClick={closeForm}><X size={14} /></button>
       </header>
       <div className="form-body">
         {form.mode === 'op' ? <OpForm draft={form.draft} tooling={form.tooling} workOffset={form.workOffset} />
-          : form.mode === 'setup' ? <SetupForm draft={form.draft} isNew={next} /> : <FirstOperation />}
+          : form.mode === 'setup' ? <SetupForm draft={form.draft} isNew={next} /> : form.mode === 'nest' ? <NestForm draft={form.draft} /> : <FirstOperation />}
         {(message || (problem && !first)) && (
           <div className="form-message" data-tone={message ? 'danger' : undefined} role={message ? 'alert' : undefined} id="form-message">
             {message && <AlertTriangle size={13} />}<span>{message ?? problem}</span>

@@ -484,6 +484,80 @@ function writeThermal(code: string, model: CamProgramModel, setup: CamSetup, dra
   return applyEdits(code, edits);
 }
 
+// ── The nest ─────────────────────────────────────────────────────────────
+
+/** One NestPart of the nest: its region as the code names it, how many, the rotations it may take, whether it may be turned over. */
+export interface NestPartDraft { region: string; quantity: string; rotations: string; mirror: boolean }
+/** The program's `Nest.for_cut(cut, sheet, parts=(NestPart(...), ...), ...)` as a form: Python source per value. */
+export interface NestDraft { variable: string; sheet: string; parts: NestPartDraft[]; values: Record<string, string> }
+export const NEST_KEYS = ['part_spacing_mm', 'edge_margin_mm', 'resolution_mm', 'start_corner', 'fill_axis', 'search_iterations', 'part_in_part', 'allow_unplaced'];
+
+/** The program's nest: the top-level name bound to a `Nest.for_cut(...)` call (null: the program has none the form can read). */
+function nestCall(model: CamProgramModel): { variable: string; call: Py } | null {
+  for (const [variable, bound] of Object.entries(model.outline.bindings)) {
+    const value = bound.value;
+    if (value.k === 'call' && (value.f === 'Nest.for_cut' || value.f === 'camlib.Nest.for_cut')) return { variable, call: value };
+  }
+  return null;
+}
+
+/** The nest as its form's draft, and what the form can't show. */
+export function readNest(model: CamProgramModel): { draft: NestDraft | null; problems: string[] } {
+  const found = nestCall(model);
+  if (!found) return { draft: null, problems: ['The program has no `<name> = Nest.for_cut(cut, sheet, parts=(...), ...)` (then `<name>.run()`): write the nest that way to edit it here'] };
+  const { variable, call } = found;
+  const problems: string[] = [];
+  const parts = resolve(model.outline, argOf(call, 'parts', 2));
+  const draft: NestDraft = { variable, sheet: argOf(call, 'sheet', 1)?.src ?? '', parts: [], values: {} };
+  if (!parts || (parts.k !== 'tuple' && parts.k !== 'list')) problems.push('Its parts aren’t a tuple of NestPart(...)');
+  for (const item of parts?.items ?? []) {
+    const part = item.k === 'call' && base(item.f) === 'NestPart' ? item : null;
+    const region = part ? argOf(part, 'region', 0) : undefined, quantity = part ? argOf(part, 'quantity', 1) : undefined, rotations = part ? argOf(part, 'rotations_deg', 2) : undefined;
+    const mirror = part ? argOf(part, 'mirror', 3) : undefined;
+    if (!part || !region || !quantity || !rotations || (mirror && typeof mirror.v !== 'boolean')) { problems.push('One of its parts isn’t a NestPart(region, quantity=, rotations_deg=) the form can read'); continue; }
+    draft.parts.push({ region: region.src, quantity: quantity.src, rotations: rotations.src, mirror: mirror?.v === true });
+  }
+  for (const kw of call.kw ?? []) {
+    if (kw.key && NEST_KEYS.includes(kw.key)) draft.values[kw.key] = kw.value.src;
+  }
+  return { draft: problems.length ? null : draft, problems };
+}
+
+/** What a nest's form is missing or holds that isn't a value (labels). */
+export function nestProblems(draft: NestDraft): string[] {
+  const out: string[] = [];
+  for (const key of ['part_spacing_mm', 'edge_margin_mm', 'resolution_mm']) if (!(draft.values[key] ?? '').trim()) out.push(key.replace(/_mm$/, '').replace(/_/g, ' '));
+  draft.parts.forEach((part) => {
+    if (!/^\d+$/.test(part.quantity.trim()) && !/^[A-Za-z_]\w*$/.test(part.quantity.trim())) out.push(`${part.region}: a whole quantity`);
+    if (!/^\(\s*-?[\d.]+\s*(,\s*-?[\d.]+\s*)*,?\s*\)$/.test(part.rotations.trim()) && !/^[A-Za-z_]\w*$/.test(part.rotations.trim())) out.push(`${part.region}: rotations like (0, 90)`);
+  });
+  return out;
+}
+
+/** The code with the nest's values and parts as the form has them: only what changed is rewritten. */
+export function writeNest(code: string, model: CamProgramModel, draft: NestDraft): string {
+  const found = nestCall(model);
+  if (!found) throw new FormError('The program has no Nest.for_cut(...) to change.');
+  const { call } = found;
+  const before = readNest(model).draft;
+  if (!before || before.parts.length !== draft.parts.length) throw new FormError('The nest’s parts changed in the code meanwhile: close this and open it again.');
+  const edits: Edit[] = [];
+  for (const key of NEST_KEYS) {
+    const value = (draft.values[key] ?? '').trim();
+    if (value === (before.values[key] ?? '').trim()) continue;
+    const edit = setKeyword(call, key, value || null);
+    if (edit) edits.push(edit);
+  }
+  const parts = resolve(model.outline, argOf(call, 'parts', 2))!;
+  draft.parts.forEach((part, i) => {
+    const was = before.parts[i];
+    if (part.quantity.trim() === was.quantity.trim() && part.rotations.trim() === was.rotations.trim() && part.mirror === was.mirror) return;
+    const text = `NestPart(${part.region}, quantity=${part.quantity.trim()}, rotations_deg=${part.rotations.trim()}${part.mirror ? ', mirror=True' : ''})`;
+    edits.push({ at: parts.items![i].s, text });
+  });
+  return applyEdits(code, edits);
+}
+
 /** The code without an operation. */
 export function deleteOp(code: string, model: CamProgramModel, op: CamOp): string {
   const setup = model.setups.find((item) => item.id === op.setup);

@@ -17,7 +17,7 @@ from pathlib import Path
 from .parts import find_part
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
-FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.(py|step|stp|txt|md|json)\Z", re.IGNORECASE)
+FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.(py|step|stp|dxf|txt|md|json)\Z", re.IGNORECASE)
 MAX_FILE = 64 * 1024 * 1024
 HIDDEN = ".builds"
 
@@ -68,7 +68,7 @@ class Projects:
 
     def file(self, project: str, name: str) -> Path:
         if not FILE.fullmatch(name or ""):
-            raise ProjectError(f"{name!r} isn't a project file name (a .py, .step, .stp, .txt, .md or .json file).")
+            raise ProjectError(f"{name!r} isn't a project file name (a .py, .step, .stp, .dxf, .txt, .md or .json file).")
         return self.path(project) / name
 
     def list(self) -> list[dict]:

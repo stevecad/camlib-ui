@@ -123,6 +123,8 @@ export const NESTED: Record<string, NestedChoice> = {
   small_holes: { classes: ['SmallHoles'], label: () => 'Slower, height control off', none: 'Cut like the rest' },
   micro_joints: { classes: ['MicroJoints'], label: () => 'Leave bridges', none: 'None' },
   common_line: { classes: ['CommonLine'], label: () => 'Share one cut', none: 'Off' },
+  part_order: { classes: ['SpreadHeat'], label: () => 'Spread the heat', none: 'Nearest part next' },
+  avoid_cut_parts: { classes: ['AvoidCutParts'], label: () => 'Go round them', none: 'Off' },
 };
 
 /**
@@ -287,6 +289,10 @@ const THERMAL_VIEW: Record<string, FieldView> = {
   reverse: v('Reverse direction', 'passes'),
   height_control: v('Torch height control', 'options', undefined, 'On for each loop (never over leads, nor in small holes).'),
   small_holes: v('Small holes', 'options'), micro_joints: v('Micro-joints', 'options'), common_line: v('Common lines', 'options'),
+  part_order: v('Cut order', 'passes', undefined, 'Which part is cut next. Holes always come before their outline.'),
+  avoid_cut_parts: v('Parts already cut', 'options', undefined, 'Cut parts can tip up between the slats: rapids go round them, or the cut is refused.'),
+  min_distance_mm: v('Next part at least', 'passes', MM, 'From where the last part started, so two parts cut one after the other aren’t neighbours.'),
+  clearance_mm: v('Clearance', 'options', MM, 'From the beam’s centre: include the torch body’s radius.'),
   compensation: v('Kerf compensation', 'options', undefined, 'Wear: posted with G41/G42, so the kerf is trimmed at the controller.', [['computer', 'In the program'], ['wear', 'Wear (G41/G42)']]),
   plunge_mm_min: v('Plunge feed', 'advanced', FEED, 'With heights in the program: the feed down to the pierce and cut heights.'),
   feed_percent: v('Feed', 'options', '%', 'Of the cut’s feed.'), max_diameter_mm: v('Up to diameter', 'options', MM, 'Empty: 1.5 × the sheet’s thickness.'),
@@ -301,7 +307,7 @@ const THERMAL_VIEW: Record<string, FieldView> = {
   edge_clearance_mm: v('Clearance to edges', 'options', MM, 'Material kept between a mark and its part’s edges.'),
   allow_off_part: v('Allow marks off the parts', 'options', undefined, 'Skips the proof that every mark is inside one part (marks on the scrap); the result says so.'),
 };
-const THERMAL_OPTIONS = new Set(['SmallHoles', 'MicroJoints', 'CommonLine']);
+const THERMAL_OPTIONS = new Set(['SmallHoles', 'MicroJoints', 'CommonLine', 'SpreadHeat', 'AvoidCutParts']);
 
 /** How a turning operation shows fields whose names milling uses for something else. */
 const TURNING_VIEW: Record<string, FieldView> = {

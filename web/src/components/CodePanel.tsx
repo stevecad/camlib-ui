@@ -110,7 +110,7 @@ function FileSwitcher() {
               <button type="button" className="add-file" id="new-file" onClick={() => setAdding('')}><FilePlus2 size={12} />New file</button>
               <button type="button" className="add-file" id="upload-file" title="Upload a file: a STEP file or CadQuery .py named part.* becomes the part"
                 onClick={() => upload.current?.click()}><FileUp size={12} />Upload…</button>
-              <input ref={upload} type="file" hidden accept=".py,.step,.stp,.txt,.md,.json" onChange={(event) => {
+              <input ref={upload} type="file" hidden accept=".py,.step,.stp,.dxf,.txt,.md,.json" onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';
                 if (file) { void uploadFile(file); setOpen(false); }

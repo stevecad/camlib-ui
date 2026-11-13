@@ -37,7 +37,10 @@ export function groupsFor(kind: 'mill' | 'lathe' | 'sheet'): Group[] {
       ACTIONS,
     ];
   }
-  if (kind === 'sheet') return [...START, { title: 'Cutting', priority: MID, items: ops(['ThermalCut', 'ThermalMark']) }, ACTIONS];
+  if (kind === 'sheet') {
+    return [...START, { title: 'Sheet', priority: HIGH, items: ['cam.sheet.import', 'cam.sheet.nest', 'cam.sheet.remnant'] },
+      { title: 'Cutting', priority: MID, items: ops(['ThermalCut', 'ThermalMark']) }, ACTIONS];
+  }
   return [
     ...START,
     ...(['2D', 'Holes', '3D'] as const).map((group): Group => ({ title: group, priority: MID, items: OP_SPECS.filter((spec) => spec.group === group).map((spec) => `cam.code.${spec.cls}`) })),

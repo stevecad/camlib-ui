@@ -19,7 +19,7 @@ plasma cutting program in Python, build it, see what camlib planned, checked and
   fixtures as Python) and its program (camlib itself, plus a few helpers). See [docs/programs.md](docs/programs.md).
 - **Toolpaths without writing code**: the browser's Setups list the program's setups and operations as its code says.
   The ribbon shows the operations of the setup being worked on: a mill's (2D, Holes, 3D), a lathe's (Turning,
-  Grooving, Holes, Threading) or a plasma or laser table's (Cutting: Cut and Mark).
+  Grooving, Holes, Threading) or a plasma or laser table's (Sheet: Import DXF, Nest, Remnant; Cutting: Cut and Mark).
   Right-click a setup to add any of camlib's 25 milling operations (face, pocket, contour, drill, bore, tap, parallel,
   waterline, …) through a form; double-click one to edit it; drag, Delete, F2 and Ctrl+D reorder, delete, edit and
   duplicate. Faces, hole walls and edges are picked on the part. Every field is camlib's own (from the installed
@@ -56,7 +56,10 @@ plasma cutting program in Python, build it, see what camlib planned, checked and
   each machine type and what is planned.
 - **Plasma and laser tables**: a sheet project (the `sheet` example) nests flat parts on a sheet with camlib's `Nest`
   and cuts them with a torch or a laser head (`ThermalCut`: pierces, leads and kerf paths proven clear of every part),
-  posted with camlib's QtPlasmaC, Centroid plasma, WinCNC or GRBL laser post. The Cut and Mark forms write `ThermalCut` and `ThermalMark` with the head and cut chart of the shop's recipe. The
+  posted with camlib's QtPlasmaC, Centroid plasma, WinCNC or GRBL laser post. Parts come from a DXF drawing (Import DXF; the `nest` example), the Nest form sets how many of each, their
+  rotations, the spacing and the corner the nest starts from, and each build hands out the sheet's remnant as a DXF
+  for the next job. The Cut and Mark forms write `ThermalCut` and `ThermalMark` with the head and cut chart of the
+  shop's recipe; a cut can spread its heat over the sheet and keep its rapids off parts already cut free. The
   playback shows the torch over a plate on a slat table, its arc and sparks while it cuts, and every kerf cut through
   the sheet (the table, arc and sparks are drawn for context; camlib checks the head against the sheet). See [docs/programs.md](docs/programs.md#plasma-and-laser-tables).
 - **Player**: play, step, scrub a timeline banded by operation with findings marked, at up to 500× machine time,

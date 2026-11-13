@@ -10,7 +10,8 @@ import { findDefinition, revealIn, startBuild, toast, useApp } from '../state';
 import { CUTTING_KEYS, fieldsLoaded, KIND_NAMES, KIND_OPS, kindOfSpec, OP_BY_CLASS, setFields, turningToolType, type CamlibField, type CutterType, type GeometryKind, fieldNames } from './opSpecs';
 import { base, freeOpId, readProgram, type CamOp, type CamProgramModel, type CamSetup, type Outline } from './pyCode';
 import {
-  deleteOp, duplicateOp, FormError, invalidOf, missingOf, newOp, newProgramCode, readOp, readSetup, reorderOps, setupContext, setupKindOf, writeOp, writeSetup, type Geometry, type OpDraft, type SetupDraft,
+  deleteOp, duplicateOp, FormError, invalidOf, missingOf, nestProblems, newOp, newProgramCode, readNest, readOp, readSetup, reorderOps, setupContext, setupKindOf, writeNest, writeOp, writeSetup,
+  type Geometry, type NestDraft, type OpDraft, type SetupDraft,
 } from './forms';
 
 const PROGRAM = 'program.py';
@@ -210,7 +211,8 @@ export type ProgramForm =
       known: Known;
     }
   | { mode: 'setup'; editing: string | null; draft: SetupDraft; newProgram: boolean; base: string }
-  | { mode: 'first'; pending: Pending; base: string };
+  | { mode: 'first'; pending: Pending; base: string }
+  | { mode: 'nest'; draft: NestDraft; base: string };
 
 interface EditorState {
   form: ProgramForm | null;
@@ -366,6 +368,21 @@ export async function openEditOp(operation: string) {
   open({ mode: 'op', setup: op.setup, editing: operation, draft, tooling, workOffset, prefilled: [], pending: null, base: read.code, known: { byTool: {}, top: null } }, null);
 }
 
+/** The nest's form (a sheet program's Nest.for_cut(...)), or why it is edited in code. */
+export async function openNest() {
+  const read = await programNow();
+  if (typeof read === 'string') { toast(read, 'info'); return; }
+  const { draft, problems } = readNest(read.model);
+  if (!draft) { toast(`The nest is edited in code: ${problems[0]}.`, 'info', { label: 'Edit code', run: () => void revealIn(PROGRAM, 1, false) }); return; }
+  open({ mode: 'nest', draft, base: read.code }, null);
+}
+
+export function updateNest(change: (draft: NestDraft) => NestDraft) {
+  const form = get().form;
+  if (form?.mode !== 'nest') return;
+  set({ form: { ...form, draft: change(form.draft) }, message: null });
+}
+
 /** Shows an operation's or setup's definition in program.py. */
 export async function showInCode(id: string) {
   const line = await findDefinition(PROGRAM, id);
@@ -445,6 +462,7 @@ export function updateSetup(change: (draft: SetupDraft) => SetupDraft) {
 export function okProblem(form: ProgramForm | null): string | null {
   if (!form) return null;
   if (form.mode === 'first') return 'Choose the setup’s first operation.';
+  if (form.mode === 'nest') { const problems = nestProblems(form.draft); return problems.length ? `Needed: ${problems.join(', ')}.` : null; }
   if (form.mode === 'op') {
     const missing = missingOf(form.draft);
     if (missing.length) return `Needed: ${missing.join(', ')}.`;
@@ -486,6 +504,12 @@ export async function commitForm() {
     const now = await programNow();
     if (typeof now === 'string') { set({ message: now }); return; }
     if (now.code !== form.base) { set({ message: 'program.py changed meanwhile: close this and open it again.' }); return; }
+    if (form.mode === 'nest') {
+      const error = await saveProgram(writeNest(now.code, now.model, form.draft), true);
+      if (error) { set({ message: error }); return; }
+      closeForm();
+      return;
+    }
     let code: string;
     if (form.mode === 'op' && form.pending) {
       const read = await pendingProgram(form.pending);

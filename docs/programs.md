@@ -341,6 +341,28 @@ part before any motion; its report (the result's Operations) lists the parts, lo
 overcut, `SmallHoles`, `MicroJoints`, `CommonLine` and `ThermalMark` are camlib's (its `docs/operations.md`, "Plasma
 and laser cutting").
 
+**Parts from a drawing, the nest and the remnant.** The `nest` example (`camlib_ui/examples/nest/`) is the workflow
+for cutting your own parts:
+
+1. **Import DXF** (ribbon, Sheet) puts a drawing in the project. `dxf_parts("parts.dxf", unit_mm=1,
+   join_tolerance_mm=0.01)` reads it: each closed outline is a part, with the holes drawn inside it, in the order they
+   are drawn. `unit_mm` is 1 for a drawing in millimetres and 25.4 for inches; both values are stated, never guessed.
+   Lines, arcs, circles and polylines are read; a spline, an ellipse, a block or an open outline is refused with the
+   entity it is about (explode or close it in the drawing).
+2. **Nest** (ribbon, Sheet) edits the program's `layout = Nest.for_cut(cut, sheet, parts=(NestPart(...), ...), ...)`:
+   copies and rotations per part, the material left between cuts and to the sheet's edge, and where the nest starts
+   (`start_corner`, `fill_axis`): the remnant is left on the far side. camlib places the copies and proves the
+   spacing, or refuses naming the parts that don't fit.
+3. **Cut** edits the `ThermalCut`. Two of its options matter on a real table: the cut order (`SpreadHeat(min_distance_mm)`
+   keeps two parts cut one after the other apart, against heat building up in one place) and
+   `AvoidCutParts(clearance_mm)`, which keeps rapids off parts and slugs already cut free (they can tip up between the
+   slats); a rapid with no way round is refused. Both distances are yours.
+4. **Remnant** (ribbon, Sheet) downloads `remnant.dxf` from the build: what is left of the sheet, from
+   `layout.remnant(nest, remnant_margin_mm=3)`, handed out with `Program(..., outputs={"remnant.dxf":
+   write_regions(remnant.pieces[0])})`. Import it into the next project and use it as the sheet:
+   `(sheet,) = dxf_parts("remnant.dxf", unit_mm=1, join_tolerance_mm=0.001)`. It is in the coordinates of the sheet
+   it was cut from, so the plate goes back against the same corner; it is the planned remnant, not a measured one.
+
 **The forms.** With a sheet setup selected the ribbon's Cutting group has **Cut** (`ThermalCut`) and **Mark**
 (`ThermalMark`); double-click an operation to edit it. A cut's form takes the head (the program's
 `head(shop.<machine>, shop.<recipe>)`), the parts (a nest's `.region`, or a `PlanarRegion` the program makes), the
