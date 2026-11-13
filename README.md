@@ -42,7 +42,7 @@ plasma cutting program in Python, build it, see what camlib planned, checked and
   or shows that operation's toolpath (<kbd>Alt</kbd>+click shows only that one, and again puts the others back; a
   setup's eye does all of its operations). The moves between operations go with the operation they lead to. It is a
   display choice, kept per project: the playback, the tool and the stock still run every operation.
-- **Lathes**: a lathe project (the `shaft` example) has a turned part, a shop with a lathe, its turning tools (ISO
+- **Lathes**: a lathe project (the `shaft` and `bushing` examples) has a turned part, a shop with a lathe, its turning tools (ISO
   inserts and holders, blades, threading inserts, drills) and its turret, and a program of camlib's turning operations
   posted with camlib's FANUC or Centroid lathe post. The ten turning operations (face, rough, finish, groove, part
   off, thread, drill, bore, face groove) have forms like the milling ones, every field camlib's own. The 3D view shows
@@ -91,8 +91,8 @@ cd web && npm ci && npm run build && cd ..
 Then open <http://127.0.0.1:8765>. An empty projects folder is given the examples to start from: `plate` (face,
 pocket, outline and holes, in a vise), `cover` (an adaptive pocket that follows the stock, a recess entered by a
 ramp, the outline cut through with tabs at points), `shaft` (a lathe: a bar faced, roughed, finished, threaded and
-parted off) and `sheet` (a plasma table: two parts nested on a sheet and cut out). `shaft` and `sheet` need camlib's
-posts (below). A new project can start from any of them. Every machine, tool, speed and
+parted off), `bushing` (a lathe: a hole drilled and bored, the outside turned and grooved) and `sheet` (a plasma table:
+two parts nested on a sheet and cut out). `shaft`, `bushing` and `sheet` need camlib's posts (below). A new project can start from any of them. Every machine, tool, speed and
 feed in the examples is an example value, not a real machine's.
 
 `start.sh` checks that camlib-ui and camlib are installed, builds the interface if it isn't built yet, finds camlib's
@@ -139,7 +139,7 @@ cd web && npm run typecheck && npm test
 | `camlib_ui/shop.py`, `program.py`, `parts.py` | The shop as code, the program helpers, part files. |
 | `camlib_ui/stream.py`, `build/stream.py` | The playback stream's reader and writer ([docs/playback-stream.md](docs/playback-stream.md)). |
 | `camlib_ui/build/turning.py` | A lathe setup as the result and the stream describe it (the bar, the part's half-section, the tools' outlines). |
-| `camlib_ui/examples/plate/`, `cover/`, `shaft/`, `sheet/` | The example projects (`shaft`: a lathe; `sheet`: a plasma table). |
+| `camlib_ui/examples/plate/`, `cover/`, `shaft/`, `bushing/`, `sheet/` | The example projects (`shaft`, `bushing`: a lathe; `sheet`: a plasma table). |
 | `web/src/` | The interface: React, three.js (react-three-fiber), CodeMirror. |
 
 ## License

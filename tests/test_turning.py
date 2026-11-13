@@ -167,6 +167,12 @@ def test_what_a_lathe_machine_refuses(client):
     for name, (old, new, message) in cases.items():
         refused = variant(client, f"shaft_{name}", "shaft", _replaced(old, new), mode="preview")
         assert refused["ok"] is False and message in refused["program_error"], (name, refused["program_error"][-600:])
+    # A lathe setup isn't posted for a mill: the shop's controller says what its machine does.
+    assert client.post("/api/projects", json={"name": "shaft_on_a_mill", "example": "shaft"}).status_code == 200
+    edit(client, "shaft_on_a_mill", "shop.py", _replaced('dialect="fanuc_lathe_system_a_v1",\n                              processes=("turning",)',
+                                                         'dialect="linuxcnc_cartesian_linear_v1",\n                              processes=("milling",)'))
+    refused = build(client, "shaft_on_a_mill", mode="preview")
+    assert refused["ok"] is False and "Setup turn is a lathe setup, but machine lathe's controller posts milling" in refused["program_error"]
 
 
 def test_the_shops_turning_tools_map_field_for_field():
@@ -274,3 +280,60 @@ def test_what_the_forms_write_for_a_lathe_builds(client, tmp_path):
         done = build(client, project)
         assert done["ok"] and done["released"] == 1, (name, done.get("program_error"))
         assert [op["id"] for op in done["metadata"]["setups"][0]["operations"]] == expected[name], name
+
+
+# ── The bushing: a hole drilled and bored, a groove, the Centroid post ─────
+
+@pytest.fixture(scope="module")
+def bushing(client) -> dict:
+    """The bushing example (posted with camlib's Centroid CNC12 lathe post), built in full."""
+    from conftest import POSTS
+    if POSTS is None:
+        pytest.skip("camlib's controller posts aren't there (CAMLIB_POSTS)")
+    return build(client, "bushing")
+
+
+def test_the_bushing_is_released(client, bushing):
+    assert bushing["ok"] and bushing["released"] == 1, bushing.get("program_error")
+    (setup,) = bushing["metadata"]["setups"]
+    (machine,) = setup["machines"]
+    assert machine["post"] == "centroid_lathe" and machine["finding_counts"] == {}
+    assert [op["id"] for op in setup["operations"]] == ["face", "drill", "bore_rough", "bore_finish", "turn", "groove", "part_off"]
+    assert machine["material"]["gouge"]["assessment"] == "within_tolerance"
+    lines = client.get(bushing["files"]["gcode-1.nc"]).text.splitlines()
+    assert lines[:8] == ["G21", "G18", "G98", "G97", "G40", "G80", "G52 X0 Z0", "G61"]
+    assert [line for line in lines if line.startswith("T")] == ["T0101", "T0202", "T0303", "T0101", "T0404"]
+    # The part as described: its outside with the groove, and its hole down to the drill point on the axis.
+    (described,) = bushing["metadata"]["program"]["setups"]
+    assert [15, -30, 0] in described["stock"]["profile"] and described["stock"]["bore"][0] == [11, 0, 0]
+    assert described["stock"]["bore"][-1][0] == 0 and described["stock"]["bore"][-1][1] < -25
+
+
+def test_the_stream_holds_the_bore(client, bushing):
+    data = client.get(bushing["files"]["cam-playback.bin"]).content
+    stream.check(data)
+    reader = stream.Reader(data)
+    (setup,) = reader.setups()
+    stock = setup["stock"]
+    n, cell = stock["nx"], (lambda z: int((z - stock["z_min_mm"]) / stock["cell_mm"][0]))
+    machine = bushing["metadata"]["setups"][0]["machines"][0]
+    grid = reader.stock_at(setup, setup["moves"])
+    upper, lower = stream.volume(setup, grid)
+    assert abs(upper - machine["stock_remaining_mm3"]["upper"]) < 0.5 and abs(lower - machine["stock_remaining_mm3"]["lower"]) < 0.5
+    # Row 1 is the bore: 11 mm where it was bored, the drill's 8 mm below that, none (0) behind the hole.
+    bore = lambda z: (grid[2 * (n + cell(z))], grid[2 * (n + cell(z)) + 1])
+    assert bore(-10)[0] == pytest.approx(11, abs=0.02) and bore(-24.6)[1] <= 11 and bore(-26)[1] <= 8.01 and bore(-35) == (0, 0)
+    # Row 0 is the outside: the groove's bottom at 15 mm, the part at 18 mm.
+    outer = lambda z: grid[2 * cell(z) + 1]
+    assert outer(-31.5) == pytest.approx(15, abs=0.02) and outer(-10) == pytest.approx(18, abs=0.02)
+    # Before the drill the bar is solid: the hole appears as the program reaches it.
+    drill = next(i for i, op in enumerate(setup["operations"]) if op["id"] == "drill")
+    moves = [m for chunk in setup["chunks"] for m in reader.moves(setup, chunk)]
+    first = next(i for i, m in enumerate(moves) if m["operation"] == drill)
+    before = reader.stock_at(setup, first)
+    assert max(before[2 * n:]) == 0
+    # The drill is drawn round the axis from its tip; the boring bar's insert lies toward the axis from its tip (-x).
+    tools = {tool["id"]: tool["turning"] for tool in setup["tools"]}
+    assert tools["t_drill"]["insert"] == "drill" and tools["t_drill"]["insert_outline"][0] == [0, 0]
+    assert tools["t_bore"]["side"] == "inner" and min(p[0] for p in tools["t_bore"]["insert_outline"]) < -4
+    assert max(p[0] for p in tools["t_bore"]["insert_outline"]) == pytest.approx(0, abs=0.01)

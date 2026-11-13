@@ -1295,11 +1295,16 @@ def machine(item, setup, *, tooling=None, work_to_machine=_REQUIRED, fixtures=()
     from camlib.motion import WorkFrame
     from camlib.post import ToolSetting
 
-    if _choose_post(_definition(item, "machine_instance").get("controller"), post).process == "turning":
+    process = _choose_post(_definition(item, "machine_instance").get("controller"), post).process
+    if process == "turning":
         return _lathe_machine(item, setup, post, tooling=tooling,
                               work_to_machine=None if work_to_machine is _REQUIRED else work_to_machine, fixtures=fixtures,
                               lowering=lowering, position_after_mm=position_after_mm, diameter_register=diameter_register,
                               premises=premises)
+    if getattr(setup, "turning", None) is not None:
+        raise ShopMappingError(f"Setup {setup.id} is a lathe setup, but machine {item.key}'s controller posts {process}: "
+                               "post it for a shop lathe (MachineModel.lathe with a lathe controller, e.g. dialect "
+                               "\"fanuc_lathe_system_a_v1\").")
     if work_to_machine is _REQUIRED or work_to_machine is None:
         raise ShopMappingError(f"machine({getattr(item, 'key', item)!r}, ...) needs work_to_machine=: where the work "
                                "zero (the part's origin) sits in the machine's coordinates, i.e. the work offset's X Y Z "

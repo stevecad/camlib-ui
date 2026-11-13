@@ -34,8 +34,10 @@ Status words: **there** (on this branch, tested), **partly**, **missing**.
   `TurningSetup.from_section(turned(part), chuck_z_mm=, clearance_mm=, tolerance_mm=)`), the `Turn*` operations, and
   `machine(shop.lathe, setup, ...)`. **there**
 - **Operations** (all ten of camlib's): `TurnFace`, `TurnRough`, `TurnFinish`, `TurnGroove`, `TurnPartOff`,
-  `TurnThread`, `TurnDrill`, `TurnBoreRough`, `TurnBoreFinish`, `TurnFaceGroove`. All build and play back; all have
-  forms (fields from the installed camlib, required where camlib has no default). **there**
+  `TurnThread`, `TurnDrill`, `TurnBoreRough`, `TurnBoreFinish`, `TurnFaceGroove`. All have forms (fields from the
+  installed camlib, required where camlib has no default). The `shaft` and `bushing` examples and their tests build
+  and play back nine of them; `TurnFaceGroove` goes through the same path but no example exercises it yet, and the
+  ring it removes isn't drawn (L3, L4). **there**, but for that
 - **Stock and playback**: camlib streams a turned stock: per 0.25 mm bin along Z (the `TurnStockSpec`'s `cell_mm`) the
   lower and upper bound of the bar's outer radius and of its bore's radius, plus rings removed inside the material
   (face grooves). camlib's Python `TurnStockState.accept` returns no per-move delta (its `changed_count` is 0), only
@@ -59,7 +61,7 @@ Status words: **there** (on this branch, tested), **partly**, **missing**.
 | L1 | A lathe **setup form** (new lathe setup, edit its bar, chuck face, clearance, tolerance, start position, turret, machine premises) | none (the outline already reads it) | `forms.ts` `readSetup`/`writeSetup`/`newProgramCode` have one milling shape: add a turning `SetupDraft` variant; `ProgramForm.tsx` `SetupForm` a second layout; `programEditor.ts` `openSetup`, `okProblem` | M |
 | L2 | A **lathe view**: the axis horizontal (Z to the right, X up), a 2D half-section mode | none | `viewport/viewer.ts` keeps Z up for every named view and for "keep Z up" orbiting: add an X-up standard view for lathe setups; `turnedStock.ts` already has `turnedOutline` for a 2D section | M |
 | L3 | **Face-groove rings** drawn (the stream already lists them: `stock.rings`) | none | `turnedStock.ts`: subtract each ring present at the move from the bins' material before meshing | S |
-| L4 | A second example, **`bushing`**: drill on axis, bore rough and finish with a boring bar (`side="inner"`), an outside groove with a blade, part off; a third with a face groove | example files only; `shop.py` and `program.py` map all of it already (unit-tested for an inner tool) | none | S |
+| L4 | **there**: a second example, `bushing`: drill on axis, bore rough and finish with a boring bar (`side="inner"`), the outside turned to size, a groove with a blade, part off, on the Centroid post. Still missing: an example with a face groove (`TurnFaceGroove`, a blade curved for its diameter range) | example files and tests only | none | done; S for the face groove |
 | L5 | **Partial-move stock**: the stock part way through the playing move (camlib has `TurnStockState.preview(frame, fraction)`), instead of at the move's end | a preview endpoint, or sub-steps written into the stream for long cuts | `TurningView.tsx` `TurnedStock` seeks whole moves | M |
 | L6 | Holders from the maker's **model** (`TurningHolder.from_model`, a mesh), solid boring bars (`SolidBarHead`), free `InsertOutline`s | `shop.py` `TurningHolder`/`TurningInsert` cover camlib's parametric kinds only; `program.py` `_turning_tool`; `build/turning.py` outlines | none (the outlines drawn come from the server) | M |
 | L7 | A **machine crash model** for the example lathe (camlib `docs/machine.md`, `process="turning"`), so travel and the machine's bodies are checked instead of accepted as unchecked | `shop.py`: declare bodies and axes; `program.py` `machine(crash_model=...)` already passes camlib's `MachineModel` through `encode` | the result panel already words machine findings | L |
@@ -114,8 +116,8 @@ milling job: a 2D view with the parts, pierces and marks, the nest's own figures
 points) show 2D work on one flat part. camlib does much more that needs no new code in the interface, only projects
 and the tests that build them:
 
-| # | Example | Shows | What it needs |
-|---|---|---|---|
+| # | Example | Shows | What it needs | Size |
+|---|---|---|---|---|
 | M1 | `boss` — a CAD solid with a filleted boss on a plate | 3D `Roughing` around the part (`surface(part)` as target), `Parallel` and `Waterline` finishing with a ball end mill split by slope (`slope_from_deg`/`slope_to_deg`), `Pencil` in the fillets, `Flat` on the flats; the material check against the solid with its tolerance | part.py, shop (a ball end mill), program; all forms exist (3D group). Build time is the thing to watch (camlib's `bench/workloads.py` has roughing and finishing workloads on a filleted boss to size it by) | M |
 | M2 | `rest` — a pocket roughed with a 10 mm cutter, then `RestPocket` with a 4 mm one; `RestRoughing` on a 3D part | rest machining from the stock as cut (camlib reports where it cut and what it left) | forms exist | S |
 | M3 | `adaptive` — a deep L pocket and an open shoulder | `AdaptivePocket` on the default planner with `StockEdgeEntry` and a `HelicalEntry`, its engagement report (already worded by `cam/report.ts`), `travel_clearance_mm` | forms exist | S |
@@ -131,7 +133,8 @@ and the tests that build them:
    stream, the `shaft` example, the revolved stock and tool in the 3D view, forms for the ten turning operations,
    tests, docs.
 2. **P1** (done on this branch): plasma shop helpers, the `sheet` example, tests, docs.
-3. **L4** (bushing example: drill, bore, groove) and **M2–M4** (milling examples that only need project files).
+3. **L4** (done on this branch: the `bushing` example) and **M2–M4** (milling examples that only need project
+   files).
 4. **P2** (2D sheet view) and **L2** (lathe view): the two views that make the other machine types read at a glance.
 5. **L1** (lathe setup form), **P4** (cutting forms), **P3** (nesting).
 6. **M1**, **M7**, **L5–L8**, **P5–P6**.

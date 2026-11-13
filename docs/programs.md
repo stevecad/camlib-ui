@@ -51,7 +51,8 @@ rack = shop.add(ToolSetup("rack", "Rack", tools={2: (t_em6, {"offsets": {"length
 The helpers are `MachineModel`, `Spindle`, `Changer`, `Controller`, `Machine`, the cutters (`EndMill`,
 `BallEndMill`, `BullEndMill`, `Drill`, `ChamferMill`, `FaceMill`, `ShellMill`, `Reamer`, `Tap`, `ThreadMill`,
 `BoringBar`), `Holder`, `Tool`, `ToolSetup`, `Material`, `Preset` and `Post`; `Record(kind, key, {...})` writes any
-other record (a fixture, for one). See `camlib_ui/shop.py` and the example's `shop.py`.
+other record (a fixture, for one). See `camlib_ui/shop.py` and the example's `shop.py`. A lathe's and a plasma or
+laser table's helpers are in [Lathes](#lathes) and [Plasma and laser tables](#plasma-and-laser-tables).
 
 Every value camlib checks against comes from the shop (travel, feeds, spindle, tool and holder geometry) or from the
 program. Nothing is assumed: a value camlib needs that neither gives is refused with what to add.
@@ -180,7 +181,9 @@ come from a camlib checkout's `examples/` folder (`--camlib-posts`).
 
 A lathe project is the same three files. The `shaft` example (`camlib_ui/examples/shaft/`) is a complete one: a bar
 faced, roughed, finished (a thread relief with a fillet, followed as an arc), threaded and parted off, posted with
-camlib's FANUC lathe post. Its values are example values, not a real machine's or a tool maker's.
+camlib's FANUC lathe post. The `bushing` example beside it drills a hole on the axis, bores it with a boring bar
+(`side="inner"`), turns the outside to size, grooves it with a blade and parts off, on camlib's Centroid lathe post.
+Their values are example values, not a real machine's or a tool maker's.
 
 **The part** is a solid of revolution about its Z axis with its front face toward +Z. The lathe's Z is the part's Z and
 the lathe's X is the radius; the centre of the front face is the program's zero. `turned(part)` reads its half-section
