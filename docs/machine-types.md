@@ -43,7 +43,7 @@ Status words: **there** (on this branch, tested), **partly**, **missing**.
   (face grooves). camlib's Python `TurnStockState.accept` returns no per-move delta (its `changed_count` is 0), only
   the whole stock (`stock()`), so the build diffs the bins after every move and writes the changed ones into the same
   stream format as a milling grid (`nx` bins × 2 rows; docs/playback-stream.md "Turned stock"). The front end revolves
-  the bins about Z into a closed mesh with a quarter cut away (`web/src/cam/turnedStock.ts`, `TurningView.tsx`), and
+  the bins about Z into a closed mesh (`web/src/cam/turnedStock.ts`, `TurningView.tsx`; the whole bar, turning with a chuck while it plays), and
   draws the tool from its insert's and holder's outlines at the point the program moves. **there**
 - **Posts**: `fanuc_lathe` (camlib `examples/fanuc_lathe_post.py`) and `centroid_lathe`
   (`examples/centroid_lathe_post.py`), from `--camlib-posts`. **there**. A LinuxCNC lathe isn't offered: camlib's

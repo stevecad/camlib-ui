@@ -46,8 +46,8 @@ plasma cutting program in Python, build it, see what camlib planned, checked and
   inserts and holders, blades, threading inserts, drills) and its turret, and a program of camlib's turning operations
   posted with camlib's FANUC or Centroid lathe post. The ten turning operations (face, rough, finish, groove, part
   off, thread, drill, bore, face groove) have forms like the milling ones, every field camlib's own. The 3D view shows
-  camlib's own turned stock revolved about the spindle axis, a quarter cut away, with the tool's insert and holder in
-  the section. See
+  camlib's own turned stock revolved about the spindle axis (the whole bar, lying along the screen, turning with its chuck while it plays), with the tool's insert and holder at
+  the point the program moves. See
   [docs/programs.md](docs/programs.md#lathes); [docs/machine-types.md](docs/machine-types.md) says what is there for
   each machine type and what is planned.
 - **Plasma and laser tables**: a sheet project (the `sheet` example) nests flat parts on a sheet with camlib's `Nest`

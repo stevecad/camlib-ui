@@ -258,10 +258,12 @@ What a lathe build's result says:
   left (a nose radius in a corner, a roughing allowance) is reported, not refused.
 - **Operations**: each one's passes, cut length and least clearances to the part and the holder, as camlib reported.
 
-In the 3D view the bar is drawn revolved about Z, with a quarter cut away so the section and the tool in it show: it
-is camlib's own turned stock at the playback position (per 0.25 mm bin along Z, the most material that may still be
-there), with the tool's insert and holder outlines at the point the program moves. The view keeps Z up, so a lathe's
-axis stands upright. Before a build the bar is shown with the part's half-section and the chuck face (dashed).
+In the 3D view the bar is drawn whole, revolved about Z: it is camlib's own turned stock at the playback position (per
+0.25 mm bin along Z, the most material that may still be there), with the tool's insert and holder outlines at the
+point the program moves. A lathe project opens with the spindle axis across the screen, the chuck on the left and the
+radius up. While the playback runs with the spindle on, the bar and a chuck drawn behind the chuck face turn (the
+player's Spin toggle): slowed down to be seen, three lines along the bar and the jaws showing it. The chuck is a
+picture, not a model of yours, and nothing is checked against it. Before a build the bar is shown with the part's half-section and the chuck face (dashed).
 
 The tree lists a lathe setup and its operations from the code, and the forms edit its operations as they do a mill's:
 right-click the setup → **Add turning operation** (or the ribbon's Turning group), double-click an operation to edit

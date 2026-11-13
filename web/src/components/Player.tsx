@@ -200,6 +200,8 @@ function Deck({ source }: { source: PlayerSource }) {
           </span>
           {!turned && <button type="button" className="toggle" id="stock-grid" data-on={show.grid || undefined} title="Show camlib's own stock: the grid every check ran on, instead of the fine display stock"
             onClick={() => setShow({ grid: !show.grid })}>camlib grid</button>}
+          {turned && <button type="button" className="toggle" id="stock-spin" data-on={show.spin || undefined} title="Turn the bar and its chuck while the spindle runs (slowed down to be seen)"
+            onClick={() => setShow({ spin: !show.spin })}>Spin</button>}
           <button type="button" className="toggle" data-on={show.tool || undefined} onClick={() => setShow({ tool: !show.tool })}>Tool</button>
           <button type="button" className="toggle" data-on={show.part || undefined} onClick={() => setShow({ part: !show.part })}>Part</button>
           <button type="button" className="toggle" data-on={show.fixtures || undefined} onClick={() => setShow({ fixtures: !show.fixtures })}>Fixtures</button>

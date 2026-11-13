@@ -476,7 +476,8 @@ export default function Viewport() {
     const tryFrame = () => {
       if (!viewer.controls) { frame = requestAnimationFrame(tryFrame); return; }
       framed.current = key;
-      viewer.setView('iso', false);
+      // A lathe: its spindle axis across the screen. Anything else: isometric.
+      if (setup?.stock?.kind === 'turned') viewer.setTurningView(false); else viewer.setView('iso', false);
     };
     tryFrame();
     return () => cancelAnimationFrame(frame);
@@ -504,7 +505,8 @@ export default function Viewport() {
         {part.mesh && (formOpen || (!view.partHidden && (show.part || !source))) && <PartView mesh={part.mesh} translucent={!!source && !formOpen} />}
         {setup && !streaming && (setup.stock?.kind === 'turned' ? <TurnedBar stock={setup.stock} /> : <StockBox setup={setup} />)}
         {source && streaming && (turned
-          ? <TurnedStock source={source} mode={show.stock as 'solid' | 'translucent'} />
+          ? <TurnedStock source={source} mode={show.stock as 'solid' | 'translucent'} spin={show.spin}
+              chuck={setup?.stock?.kind === 'turned' ? setup.stock.chuck_z_mm : null} />
           : show.grid || !plan
             ? <GridStock source={source} mode={show.stock as 'solid' | 'translucent'} />
             : <DisplayStock source={source} plan={plan} mode={show.stock as 'solid' | 'translucent'} />)}

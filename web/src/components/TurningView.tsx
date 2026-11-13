@@ -1,17 +1,17 @@
 /**
  * A lathe setup in the 3D view (work coordinates: Z the spindle axis, X the radius): the bar before a build, camlib's
- * own turned stock from a full build's playback stream at the playback position, cut away over a quarter so its section
- * shows, and the turning tool (its insert's and holder's outlines) at the point the program moves. Drawing only: camlib
- * checked every move with its own models.
+ * own turned stock from a full build's playback stream at the playback position (the whole bar, turning with its chuck
+ * while it plays), and the turning tool (its insert's and holder's
+ * outlines) at the point the program moves. Drawing only: camlib checked every move with its own models.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Line } from '@react-three/drei';
 import * as THREE from 'three';
 import type { TurnedStock as TurnedStockSpec } from '../api';
 import { usePlayer, type PlayerSource } from '../state';
 import { tipAt } from '../cam/motion';
-import { turnedMesh } from '../cam/turnedStock';
+import { turnedMesh, turnedOutline } from '../cam/turnedStock';
 import type { TurningToolShape } from '../cam/stream';
 
 /** A half-section, (radius, z, bulge) points, as (x, 0, z) points in the XZ plane (an arc's bulge as chords). */
@@ -61,14 +61,50 @@ export function TurnedBar({ stock }: { stock: TurnedStockSpec }) {
   );
 }
 
+/** A three-jaw chuck behind its face at `z` (drawn from the bar's radius; not a model of any chuck, and not checked). */
+function Chuck({ z, bar }: { z: number; bar: number }) {
+  const parts = useMemo(() => {
+    const depth = Math.max(8, bar * 0.9), body = bar * 2.4;
+    const disc = new THREE.CylinderGeometry(body, body, depth, 48);
+    disc.rotateX(Math.PI / 2);
+    disc.translate(0, 0, z - depth * 1.1 - depth / 2);
+    const jaws = [0, 1, 2].map((k) => {
+      const jaw = new THREE.BoxGeometry(body - bar * 0.98, bar * 0.7, depth * 1.1);
+      jaw.translate(bar * 0.98 + (body - bar * 0.98) / 2, 0, z - (depth * 1.1) / 2);
+      jaw.rotateZ((k * 2 * Math.PI) / 3 + Math.PI / 2);
+      return jaw;
+    });
+    return { disc, jaws };
+  }, [z, bar]);
+  useEffect(() => () => { parts.disc.dispose(); parts.jaws.forEach((jaw) => jaw.dispose()); }, [parts]);
+  return (
+    <group>
+      <mesh geometry={parts.disc} raycast={() => {}}><meshStandardMaterial color="#4a535b" metalness={0.7} roughness={0.45} /></mesh>
+      {parts.jaws.map((jaw, k) => <mesh key={k} geometry={jaw} raycast={() => {}}><meshStandardMaterial color="#6b757e" metalness={0.7} roughness={0.4} /></mesh>)}
+    </group>
+  );
+}
+
+/** How fast the bar is drawn turning (revolutions a second on screen) for a spindle speed: slow enough to be seen. */
+export const spinRate = (rpm: number) => (rpm > 0 ? Math.min(1.5, Math.max(0.3, rpm / 800)) : 0);
+
 /**
  * camlib's turned stock from the playback stream, at the playback position: as it is once the moves before the playing
  * one are done (the stream's changes apply at a move's end). Seeks read only what they need, the latest wins.
+ *
+ * The whole bar. With `spin` the bar and
+ * its chuck turn while the playback runs with the spindle on: a round bar turning looks still, so three lines along its
+ * surface and the chuck's jaws show it. The turning is slowed down to be seen (`spinRate`), in the direction of M3
+ * (counter-clockwise seen from the tailstock); it is a picture of the spindle running, not its speed.
  */
-export function TurnedStock({ source, mode }: { source: PlayerSource; mode: 'solid' | 'translucent' }) {
+export function TurnedStock({ source, mode, spin, chuck }: {
+  source: PlayerSource; mode: 'solid' | 'translucent'; spin: boolean; chuck: number | null;
+}) {
   const invalidate = useThree((state) => state.invalidate);
   const canvas = useThree((state) => state.gl.domElement);
   const geometry = useMemo(() => new THREE.BufferGeometry(), [source]);
+  const [seams, setSeams] = useState<[number, number, number][][]>([]);
+  const turning = useRef<THREE.Group>(null);
   useEffect(() => () => geometry.dispose(), [geometry]);
   useEffect(() => {
     const stock = source.header.stock;
@@ -80,11 +116,17 @@ export function TurnedStock({ source, mode }: { source: PlayerSource; mode: 'sol
       busy = true;
       source.stream.stockAt(source.setup, n).then((cells) => {
         if (!live) return;
-        const mesh = turnedMesh(grid, cells);
+        const mesh = turnedMesh(grid, cells, { sweep: 2 * Math.PI });
         geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
         geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
         geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
         geometry.computeBoundingSphere();
+        // Three lines along the bar's surface, a hair off it: what shows the bar turning.
+        const outline = turnedOutline(grid, cells).filter(([r]) => r > 1e-6);
+        setSeams([0, 1, 2].map((k) => {
+          const a = (k * 2 * Math.PI) / 3 + Math.PI / 6;
+          return outline.map(([r, z]) => [(r + 0.02) * Math.cos(a), (r + 0.02) * Math.sin(a), z] as [number, number, number]);
+        }));
         shown = n;
         // What is drawn, readable from the page: the move the stock is at and its triangles.
         canvas.dataset.turnedStock = `${n}:${mesh.indices.length / 3}`;
@@ -98,11 +140,28 @@ export function TurnedStock({ source, mode }: { source: PlayerSource; mode: 'sol
     const unsubscribe = usePlayer.subscribe((state, previous) => { if (state.position !== previous.position) seek(state.position); });
     return () => { live = false; unsubscribe(); delete canvas.dataset.turnedStock; };
   }, [geometry, source, invalidate, canvas]);
+  useFrame((_, delta) => {
+    const group = turning.current;
+    if (!group) return;
+    if (!spin) { if (group.rotation.z !== 0) { group.rotation.z = 0; invalidate(); } return; }
+    const { playing, position } = usePlayer.getState();
+    const motion = source.motion;
+    const rpm = motion.count ? motion.rpm[Math.min(motion.count - 1, Math.max(0, Math.floor(position)))] : 0;
+    const rate = playing ? spinRate(rpm) : 0;
+    canvas.dataset.turnedSpin = rate.toFixed(2);
+    if (rate <= 0) return;
+    group.rotation.z = (group.rotation.z + 2 * Math.PI * rate * Math.min(delta, 0.1)) % (2 * Math.PI);
+    invalidate();
+  });
   const clear = mode === 'translucent';
   return (
-    <mesh geometry={geometry} renderOrder={clear ? 9 : 2} raycast={() => {}}>
-      <meshStandardMaterial color="#b4bec8" metalness={0.55} roughness={0.42} transparent={clear} opacity={clear ? 0.35 : 1} depthWrite={!clear} side={THREE.DoubleSide} />
-    </mesh>
+    <group ref={turning}>
+      <mesh geometry={geometry} renderOrder={clear ? 9 : 2} raycast={() => {}}>
+        <meshStandardMaterial color="#b4bec8" metalness={0.55} roughness={0.42} transparent={clear} opacity={clear ? 0.35 : 1} depthWrite={!clear} side={THREE.DoubleSide} />
+      </mesh>
+      {seams.map((points, k) => points.length > 1 && <Line key={k} points={points} color="#59636b" lineWidth={1} transparent opacity={0.7} renderOrder={3} />)}
+      {chuck != null && <Chuck z={chuck} bar={source.header.stock.outer_radius_mm ?? 20} />}
+    </group>
   );
 }
 

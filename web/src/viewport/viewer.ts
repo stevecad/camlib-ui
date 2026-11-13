@@ -35,6 +35,7 @@ export const VIEW_LABELS: Record<StandardView, string> = {
 type CameraListener = (camera: THREE.Camera) => void;
 
 const Z_UP = new THREE.Vector3(0, 0, 1);
+const X_UP = new THREE.Vector3(1, 0, 0);
 /** How near straight up or down (radians) the camera goes with Z kept up: where the top and bottom views stand. */
 const POLE = 1e-4;
 
@@ -79,7 +80,7 @@ class Viewer {
   }
 
   /** Frames a box from a view direction, animating rotation, target and zoom together. */
-  frame(box: THREE.Box3 | null = null, direction: THREE.Vector3 | null = null, animate = true) {
+  frame(box: THREE.Box3 | null = null, direction: THREE.Vector3 | null = null, animate = true, stand: THREE.Vector3 | null = null) {
     const { controls, camera } = this;
     if (!controls || !camera) return;
     this.orbitCentre = null;
@@ -91,7 +92,7 @@ class Viewer {
     const dir = (direction ?? eye.clone().sub(target)).clone().normalize();
     if (dir.lengthSq() < 0.5) dir.set(1, -1, 0.8).normalize();
     // Named views stand upright on Z; a plain refit keeps whatever roll free orbiting left the camera in.
-    const up = direction ? Z_UP.clone() : camera.up.clone();
+    const up = stand ? stand.clone() : direction ? Z_UP.clone() : camera.up.clone();
     const basis = new THREE.Matrix4().lookAt(dir, new THREE.Vector3(), up);
     const xAxis = new THREE.Vector3().setFromMatrixColumn(basis, 0);
     const yAxis = new THREE.Vector3().setFromMatrixColumn(basis, 1);
@@ -144,7 +145,19 @@ class Viewer {
     this.autoFramed = true;
   }
 
+  /**
+   * A lathe's view: the spindle axis (Z) across the screen with the chuck on the left, the radius (X) up, seen a
+   * little from above and from the tailstock's side. The camera stands on X here; a standard view stands it on Z again.
+   */
+  setTurningView(animate = true) {
+    this.setUp(X_UP);
+    this.frame(null, new THREE.Vector3(0.45, 1, 0.5), animate, X_UP);
+    this.autoFramed = true;
+    setView({ view: null });
+  }
+
   setView(view: StandardView, animate = true) {
+    this.setUp(Z_UP);
     this.frame(null, new THREE.Vector3(...VIEW_DIRECTIONS[view]), animate);
     this.autoFramed = true;
     setView({ view });

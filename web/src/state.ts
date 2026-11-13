@@ -72,7 +72,8 @@ export interface PlayerState {
   playing: boolean;
   speed: number;
   /** `grid`: show camlib's own stock grid (the checks') instead of the fine display stock. */
-  show: { toolpath: boolean; stock: 'solid' | 'translucent' | 'off'; tool: boolean; part: boolean; fixtures: boolean; grid: boolean };
+  /** `spin`: a lathe setup's bar and chuck turning while it plays. */
+  show: { toolpath: boolean; stock: 'solid' | 'translucent' | 'off'; tool: boolean; part: boolean; fixtures: boolean; grid: boolean; spin: boolean };
   /** The finding in focus (its index in the machine's findings). */
   focus: number | null;
   stockError: string | null;
@@ -82,7 +83,7 @@ export interface PlayerState {
 
 export const usePlayer = create<PlayerState>(() => ({
   position: 0, playing: false, speed: 20,
-  show: { toolpath: true, stock: 'solid', tool: true, part: false, fixtures: true, grid: false },
+  show: { toolpath: true, stock: 'solid', tool: true, part: false, fixtures: true, grid: false, spin: true },
   focus: null, stockError: null, stockStatus: null,
 }));
 
