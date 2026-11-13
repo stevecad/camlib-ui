@@ -167,15 +167,10 @@ function Operations({ setup, operations, several }: { setup: string; operations:
 }
 
 function Status({ build }: { build: Build }) {
+  // A running build: its stage here, and each operation's progress on its own row of the browser (the left panel).
+  // With that panel hidden, the operations are listed here.
   const sidebarOpen = useApp((state) => state.sidebarOpen);
-  if (build.status === 'queued' || build.status === 'running') {
-    // The left panel shows a running build under the browser; here only while that panel is hidden.
-    if (!sidebarOpen) return <BuildStatus build={build} />;
-    return (
-      <div className="banner" data-tone="info"><span className="spinner" /><span><b>{build.status === 'queued' ? 'Waiting to build' : build.mode === 'full' ? 'Building' : 'Checking'}…</b>{' '}
-        Its progress is in the left panel, under the browser.</span></div>
-    );
-  }
+  if (build.status === 'queued' || build.status === 'running') return <BuildStatus build={build} operations={!sidebarOpen} />;
   if (build.status === 'cancelled') return <div className="banner" data-tone="info"><CircleDashed size={15} /><span>Cancelled.</span></div>;
   if (build.status === 'failed') return <div className="banner" data-tone="failed"><XCircle size={15} /><span><b>The build stopped.</b> {build.error}</span></div>;
   if (build.program_error) return <div className="banner" data-tone="failed"><XCircle size={15} /><span><b>The program didn’t build.</b> Its error is below; lines of your files open in the editor.</span></div>;

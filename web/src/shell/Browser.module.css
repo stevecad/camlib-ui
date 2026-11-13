@@ -12,9 +12,6 @@
 .headerMeta { margin-left: auto; font-size: var(--fs-xs); color: var(--text-3); }
 
 .scroll { flex: 1; min-height: 0; overflow: auto; padding: 6px 6px 24px; }
-/* A running build's status, under the tree: it keeps its place while the tree scrolls. */
-.building { flex-shrink: 0; max-height: 50%; overflow: auto; padding: 8px; border-top: 1px solid var(--border); }
-.building > :last-child { margin-bottom: 0; }
 .empty { padding: 14px 10px; color: var(--text-3); font-size: var(--fs-sm); }
 .emptyHint { padding: 4px 12px 10px 42px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.5; }
 
@@ -96,6 +93,13 @@
 /* An operation in the build running now: being planned, or planned. */
 .status[data-building='planning'] { color: var(--amber); }
 .status[data-building='done'] { color: var(--success); }
+.status[data-building='pending'] { color: var(--text-4); }
+/* The operation camlib is planning: its progress along the bottom of its own row. */
+.opRow { position: relative; }
+.rowBar { position: absolute; left: 44px; right: 6px; bottom: 0; height: 2px; border-radius: 1px; background: var(--line-2); overflow: hidden; pointer-events: none; z-index: 1; }
+.rowBar i { display: block; height: 100%; border-radius: 1px; background: var(--amber); transition: width var(--t-slow) var(--ease-standard); }
+.rowBar[data-bar='busy'] i { position: absolute; width: 30%; animation: progress-busy 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .rowBar[data-bar='busy'] i { animation: none; left: 0; width: 100%; opacity: 0.35; } }
 .status :global(.spinner) { width: 9px; height: 9px; border-width: 1.5px; }
 .statusDot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-4); }
 .statusDot[data-tone='ok'] { background: var(--success); }

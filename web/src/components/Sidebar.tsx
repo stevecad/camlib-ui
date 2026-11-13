@@ -8,7 +8,7 @@ import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { create } from 'zustand';
 import * as THREE from 'three';
 import {
-  ArrowDown, ArrowUp, Box, ChevronsDownUp, Code2, Copy, Download, Eye, EyeOff, Focus, Hammer, Layers, ListChecks, ListTree, PanelLeftClose, Pencil, Play, Plus,
+  ArrowDown, ArrowUp, Box, Check, ChevronsDownUp, Code2, Copy, Download, Eye, EyeOff, Focus, Hammer, Layers, ListChecks, ListTree, PanelLeftClose, Pencil, Play, Plus,
   ShieldAlert, Trash2, Upload, Wrench,
 } from 'lucide-react';
 import { openPlayer, revealIn, running, showAllPaths, soloPath, startBuild, togglePath, toggleSetupPaths, useApp, usePaths, usePlayer, uploadFile } from '../state';
@@ -25,8 +25,7 @@ import styles from '../shell/Browser.module.css';
 import dock from '../shell/Dock.module.css';
 import { usePanelWidth } from '../shell/panels';
 import { clock } from './Player';
-import { treeState } from '../cam/progress';
-import BuildStatus from './BuildStatus';
+import { treeRow, treeStage } from '../cam/progress';
 
 const I = { size: 15 };
 const num = (value: number | null | undefined, digits = 2) => (value == null ? '—' : Number(value.toFixed(digits)).toLocaleString());
@@ -185,7 +184,11 @@ function FixturesGroup({ setup }: { setup: SetupDescription | null }) {
  */
 function setupStatus(setupId: string): { s: string; label: string; title?: string } {
   const { build, project } = useApp.getState();
-  if (running(build)) return { s: 'running', label: build!.mode === 'full' ? 'building' : 'checking' };
+  if (running(build)) {
+    // The setup being built says what the build is doing; the others that a build runs.
+    const stage = treeStage(build!.progress, setupId);
+    return { s: 'running', label: stage ?? (build!.mode === 'full' ? 'building' : 'checking'), title: stage ? `Building: ${stage}` : undefined };
+  }
   const programs = build?.mode === 'full' && build.status === 'done' ? (build.metadata?.programs ?? []).filter((item) => item.setup === setupId) : [];
   if (!programs.length) return { s: 'none', label: 'not built' };
   const saved = project?.files.find((file) => file.name === 'program.py')?.modified ?? 0;
@@ -319,8 +322,9 @@ function OperationRow({ setup, op, index, stat, playable, locked, built, drag, d
   const alone = hasPath && built.length > 1 && hiddenCount(paths, built) === built.length - 1 && pathShown;
   const noPath = hasPath ? null : 'Build the program first.';
   const solo = () => soloPath(setup.id, op.id, built);
-  // While a build runs: whether camlib has planned this operation, or is planning it now.
-  const building = useApp((state) => (running(state.build) ? treeState(state.build?.progress, setup.id, op.id) : null));
+  // While a build runs: this operation's progress, on its own row (how far camlib is with it, then what it planned).
+  const progress = useApp((state) => (running(state.build) ? state.build?.progress : null));
+  const building = treeRow(progress, setup.id, op.id);
   const handle = `operation:${setup.id}/${op.id}`;
   const summary = op.summary;
   const tool = summary ? setup.described?.tools.find((item) => item.id === summary.tool) : null;
@@ -336,10 +340,17 @@ function OperationRow({ setup, op, index, stat, playable, locked, built, drag, d
   };
   const edit = () => { if (known) void openEditOp(op.id); else void showInCode(op.id); };
   return (
-    <div data-operation-row={op.id}>
+    <div data-operation-row={op.id} className={styles.opRow}>
+      {building?.state === 'planning' && (
+        <span className={styles.rowBar} data-bar={building.bar} role="progressbar" aria-label={`${op.id}: ${building.detail}`}
+          aria-valuemin={building.bar === 'fraction' ? 0 : undefined} aria-valuemax={building.bar === 'fraction' ? 100 : undefined} aria-valuenow={building.percent ?? undefined}>
+          <i style={building.bar === 'fraction' ? { width: `${building.percent}%` } : undefined} />
+        </span>
+      )}
       <TreeRow depth={2} icon={<OpIcon kind={op.cls ?? op.kind} size={14} />} label={op.id} item={handle} selected={selected === handle} drag={drag} dropAt={dropAt}
-        meta={building === 'planning' ? <span className={styles.status} data-status="running" data-building="planning" title="camlib is planning it"><span className="spinner" />planning</span>
-          : building === 'done' ? <span className={styles.status} data-building="done" title="Planned in the build running now">planned</span>
+        meta={building?.state === 'planning' ? <span className={styles.status} data-status="running" data-building="planning" title={`camlib is planning it: ${building.detail}`}><span className="spinner" />{building.percent != null ? `${building.percent}%` : 'planning'}</span>
+          : building?.state === 'done' ? <span className={styles.status} data-building="done" title={`Planned in the build running now: ${building.detail}`}><Check size={11} />{building.detail}</span>
+          : building?.state === 'pending' ? <span className={styles.status} data-building="pending" title="Waiting for the operations before it">waiting</span>
           : summary?.tool_number != null ? <span className={styles.metaText}>T{summary.tool_number}</span> : undefined}
         title={[
           op.cls ?? summary?.kind, tool ? `T${summary?.tool_number ?? '?'} ${tool.name}` : summary?.tool, summary?.spindle_rpm ? `S${num(summary.spindle_rpm, 0)}` : null,
@@ -411,7 +422,6 @@ function Browser() {
   const project = useApp((state) => state.project);
   const described = useApp((state) => state.described);
   const player = useApp((state) => state.player);
-  const build = useApp((state) => state.build);
   const program = described?.program ?? null;
   const shown = program?.setups.find((setup) => setup.id === player.setup) ?? program?.setups[0] ?? null;
   return (
@@ -434,7 +444,6 @@ function Browser() {
           <SetupsGroup described={program?.setups ?? null} />
         </>}
       </div>
-      {running(build) && <div className={styles.building} id="build-status"><BuildStatus build={build} /></div>}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 /**
- * A running build's status: what it is doing now, and the setup's operations as camlib plans them. It lives in the
- * left panel, under the browser (the tree it describes is right above it); the result panel on the right shows it only
- * while the left panel is hidden.
+ * A running build's status in the result panel: what it is doing now. Each operation's own progress is on its row of
+ * the browser (the left panel), next to the toolpath it belongs to; the operations are listed here as well only while
+ * that panel is hidden (`operations`).
  */
 import { CheckCircle2, CircleDashed } from 'lucide-react';
 import type { Build } from '../api';
@@ -38,8 +38,8 @@ function Progress({ progress }: { progress: BuildProgress }) {
   );
 }
 
-/** The banner and the operations of a queued or running build; nothing for any other build. */
-export default function BuildStatus({ build }: { build: Build | null }) {
+/** The banner of a queued or running build, and its operations when asked for; nothing for any other build. */
+export default function BuildStatus({ build, operations }: { build: Build | null; operations: boolean }) {
   if (!build || (build.status !== 'queued' && build.status !== 'running')) return null;
   const progress = build.status === 'running' ? build.progress : undefined;
   const doing = progress ? [progress.run ? runWords(progress.run) : null, stageWords(progress.stage)].filter(Boolean).join(' · ') : null;
@@ -48,7 +48,7 @@ export default function BuildStatus({ build }: { build: Build | null }) {
       <div className="banner" data-tone="info"><span className="spinner" /><span><b>{build.status === 'queued' ? 'Waiting to build' : build.mode === 'full' ? 'Building' : 'Checking'}…</b>{' '}
         {doing ? <span id="build-stage">{doing[0].toUpperCase() + doing.slice(1)}.</span>
           : build.mode === 'full' ? 'camlib plans every setup, checks every move, posts and decides what to release.' : 'Running the program and describing it.'}</span></div>
-      {progress && <Progress progress={progress} />}
+      {operations && progress && <Progress progress={progress} />}
     </>
   );
 }

@@ -149,8 +149,9 @@ A build runs in two processes. Stage 1 runs your files and hands back plain data
 everything it started has been killed), stage 2 rebuilds camlib's job and machines from that data, using camlib's own
 posts by name, and does everything else. Your program's code never runs where its G-code is checked and released.
 
-While a build runs, the top bar and the left panel (under the browser, below the tree it describes) say what it is
-doing; with the left panel hidden, the Result panel does. They show its stage (running the program, planning,
+While a build runs, each operation's progress is on its own row of the browser, next to the toolpath it belongs to
+(how far camlib is with it and a bar along the row, then its moves and time once planned); the setup's row and the top
+bar say the stage, and so does the Result panel, which also lists the operations while the left panel is hidden. They show the stage (running the program, planning,
 posting and checking, writing the playback, deciding the release) and, while camlib plans, each of the setup's
 operations as pending, being planned or done. The operation being planned shows how far along it is where camlib
 counts something: depth levels, finishing passes, or the area cleared by an adaptive clearing (camlib's planning

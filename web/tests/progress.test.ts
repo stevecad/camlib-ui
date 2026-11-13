@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  countWords, elapsed, fractionWords, operationRows, percent, runHeading, runningStatus, runWords, stageWords, took, treeState,
+  countWords, elapsed, fractionWords, operationRows, percent, runHeading, runningStatus, runWords, stageWords, took, treeRow, treeStage, treeState,
   type BuildProgress, type OperationProgress, type RunProgress,
 } from '../src/cam/progress.ts';
 
@@ -100,6 +100,22 @@ test('levels and passes done of those planned', () => {
   assert.equal(took(0.44), '0.4 s');
   assert.equal(took(9.96), '9 s');
   assert.equal(took(75.2), '1 min 15 s');
+});
+
+test('each operation of the setup being built has its own row of progress in the tree', () => {
+  const progress = at('planning', seven);
+  const rows = operationRows(progress.run!);
+  for (const row of rows) assert.deepEqual(treeRow(progress, 'top', row.id), row);
+  assert.equal(treeRow(progress, 'top', 'adaptive')!.state, 'planning');
+  assert.equal(treeRow(progress, 'top', 'face')!.state, 'done');
+  assert.equal(treeRow(progress, 'top', 'unknown'), null);
+  assert.equal(treeRow(progress, 'bottom', 'adaptive'), null);
+  assert.equal(treeRow(at('program'), 'top', 'adaptive'), null);
+  assert.equal(treeRow(null, 'top', 'adaptive'), null);
+  // The setup's row says the stage; another setup's does not.
+  assert.equal(treeStage(progress, 'top'), stageWords('planning'));
+  assert.equal(treeStage(progress, 'bottom'), null);
+  assert.equal(treeStage(null, 'top'), null);
 });
 
 test('the tree marks the operations of the setup being built', () => {

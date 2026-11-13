@@ -135,6 +135,23 @@ export function runHeading(run: RunProgress): string {
   return `${name ? `Setup ${name}` : 'Setup'}${place} · ${done} of ${run.operations.length} operations done`;
 }
 
+/**
+ * An operation's row of the running build, for the model tree: the same row the list shows (state, the bar, how far,
+ * and in words). Null: this setup isn't the one being built, the operation isn't in the run, or there is no progress.
+ */
+export function treeRow(progress: BuildProgress | null | undefined, setup: string, operation: string): ProgressRow | null {
+  const run = progress?.run;
+  if (!run || run.setup !== setup) return null;
+  return operationRows(run).find((row) => row.id === operation) ?? null;
+}
+
+/** What a setup's row says while it is built: the stage ("planning", "posting and checking"); null for another setup. */
+export function treeStage(progress: BuildProgress | null | undefined, setup: string): string | null {
+  const run = progress?.run;
+  if (!progress || !run || run.setup !== setup) return null;
+  return stageWords(progress.stage);
+}
+
 /** An operation's state in the running build, for the model tree (null: this setup isn't the one being built, or no progress). */
 export function treeState(progress: BuildProgress | null | undefined, setup: string, operation: string): OperationState | null {
   const run = progress?.run;
