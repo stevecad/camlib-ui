@@ -26,6 +26,7 @@ import dock from '../shell/Dock.module.css';
 import { usePanelWidth } from '../shell/panels';
 import { clock } from './Player';
 import { treeState } from '../cam/progress';
+import BuildStatus from './BuildStatus';
 
 const I = { size: 15 };
 const num = (value: number | null | undefined, digits = 2) => (value == null ? '—' : Number(value.toFixed(digits)).toLocaleString());
@@ -405,6 +406,7 @@ function Browser() {
   const project = useApp((state) => state.project);
   const described = useApp((state) => state.described);
   const player = useApp((state) => state.player);
+  const build = useApp((state) => state.build);
   const program = described?.program ?? null;
   const shown = program?.setups.find((setup) => setup.id === player.setup) ?? program?.setups[0] ?? null;
   return (
@@ -427,6 +429,7 @@ function Browser() {
           <SetupsGroup described={program?.setups ?? null} />
         </>}
       </div>
+      {running(build) && <div className={styles.building} id="build-status"><BuildStatus build={build} /></div>}
     </div>
   );
 }

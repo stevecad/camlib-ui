@@ -12,6 +12,9 @@
 .headerMeta { margin-left: auto; font-size: var(--fs-xs); color: var(--text-3); }
 
 .scroll { flex: 1; min-height: 0; overflow: auto; padding: 6px 6px 24px; }
+/* A running build's status, under the tree: it keeps its place while the tree scrolls. */
+.building { flex-shrink: 0; max-height: 50%; overflow: auto; padding: 8px; border-top: 1px solid var(--border); }
+.building > :last-child { margin-bottom: 0; }
 .empty { padding: 14px 10px; color: var(--text-3); font-size: var(--fs-sm); }
 .emptyHint { padding: 4px 12px 10px 42px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.5; }
 
