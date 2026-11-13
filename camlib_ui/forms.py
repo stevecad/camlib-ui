@@ -4,7 +4,7 @@ operation fields, and the shop's records.
 - ``outline(code)``: program.py as data. Nothing runs: every top-level name with its value as syntax, UTF-16 spans (the
   browser replaces them in its JavaScript strings directly) and the literal value where it has one. The forms decide
   what they can show; code they can't stays as it is and is edited in the code.
-- ``operation_fields()``: camlib's operations and their option objects, field by field from the installed camlib's own
+- ``operation_fields()``: camlib's milling and turning operations and their option objects, field by field from the installed camlib's own
   dataclasses ([name, type, default as Python source or None when required, keyword only]), so the forms always match
   the camlib that builds.
 - ``python -m camlib_ui.forms shop <shop.py> <out.json>``: the shop's records (the forms' machines, tool setups and
@@ -27,6 +27,9 @@ OPERATIONS = ("Facing", "Pocket", "RestPocket", "AdaptivePocket", "Roughing", "R
               "Flat", "Scallop", "Pencil", "Spiral", "Radial", "Project", "Morph")
 OPTIONS = ("HelicalEntry", "StockEdgeEntry", "RampEntry", "RasterClearing", "OffsetClearing", "AdaptiveClearing", "Tabs", "FineBore",
            "TraceSideOffset")
+# camlib's turning operations (camlib.turning: a lathe setup's), which the forms write too.
+TURNING = ("TurnFace", "TurnRough", "TurnFinish", "TurnGroove", "TurnPartOff", "TurnThread", "TurnDrill", "TurnBoreRough",
+           "TurnBoreFinish", "TurnFaceGroove")
 
 
 # ── Outline ────────────────────────────────────────────────────────────────
@@ -214,9 +217,10 @@ def operation_fields() -> dict:
     required), keyword only], from the installed camlib's dataclasses (a camlib that lacks one leaves it out)."""
     import dataclasses
     import camlib.operations as operations
+    import camlib.turning as turning
     out = {}
-    for name in (*OPERATIONS, *OPTIONS):
-        cls = getattr(operations, name, None)
+    for name in (*OPERATIONS, *OPTIONS, *TURNING):
+        cls = getattr(turning if name in TURNING else operations, name, None)
         if cls is None or not dataclasses.is_dataclass(cls):
             continue
         fields = []

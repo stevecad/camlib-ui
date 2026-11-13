@@ -56,10 +56,17 @@ function downloadGcode() {
 }
 const needsProgramFile = () => (app().project ? true : 'Open or create a project first.');
 /** An operation's form: camlib has it, and the program has a setup to put it in. */
-const opReason = (cls: string) => () => {
+const opReason = (cls: string, turning: boolean) => () => {
   if (!app().project) return 'Open or create a project first.';
   if (fieldsLoaded() && !availableSpecs().some((spec) => spec.cls === cls)) return 'The installed camlib doesn’t have this operation.';
-  return useProgram.getState().model?.setups.length ? true : useProgram.getState().problem ?? 'Add a setup first (Setup).';
+  const setups = useProgram.getState().model?.setups ?? [];
+  if (!setups.length) return useProgram.getState().problem ?? 'Add a setup first (Setup).';
+  // The setup it would go into (the one selected, or the selected operation's, else the last): a lathe's or a mill's.
+  const selected = app().selected;
+  const id = selected?.startsWith('setup:') ? selected.slice(6) : selected?.startsWith('operation:') ? selected.slice(10).split('/')[0] : null;
+  const target = setups.find((setup) => setup.id === id) ?? setups.at(-1)!;
+  if (target.turning !== turning) return target.turning ? `${target.id} is a lathe setup: it takes turning operations.` : `${target.id} isn’t a lathe setup: turning operations go into one (written in code: docs/programs.md, Lathes).`;
+  return true;
 };
 const needsProject = () => !!app().project || 'Open or create a project first.';
 const needsProgram = () => (!app().project ? 'Open or create a project first.' : app().project!.program ? true : 'The project has no program.py.');
@@ -192,8 +199,8 @@ export const commands: Command[] = [
   { id: 'cam.shop', label: 'Shop', icon: Library, category: 'Manufacture', run: () => void revealIn('shop.py', 1, false),
     description: 'Your shop as code (shop.py): machines, controllers, tools, tool setups and fixtures.', enabled: () => (app().project?.shop === 'shop.py' ? true : app().project?.shop ? 'This project uses the projects folder’s shop.py.' : 'The project has no shop.py.') },
   ...OP_SPECS.map((spec): Command => ({
-    id: `cam.code.${spec.cls}`, label: spec.label, icon: opIconOf(spec.cls) as IconType, category: 'Manufacture', description: spec.about,
-    run: () => void openNewOp(spec.cls), enabled: opReason(spec.cls),
+    id: `cam.code.${spec.cls}`, label: spec.turning ? `Turning: ${spec.label.toLowerCase()}` : spec.label, short: spec.label, icon: opIconOf(spec.cls) as IconType, category: 'Manufacture', description: spec.about,
+    run: () => void openNewOp(spec.cls), enabled: opReason(spec.cls, !!spec.turning),
   })),
   { id: 'cam.generate', label: 'Generate toolpaths', short: 'Generate', icon: ToolpathIcon as IconType, category: 'Manufacture', run: () => { void startBuild('full'); },
     description: 'Plan every setup, check every move, post, and release the G-code camlib clears.', enabled: all(needsProgram, needsIdle) },

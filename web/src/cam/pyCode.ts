@@ -29,7 +29,9 @@ export const HELPERS = 'camlib_ui.program';
 
 export const OP_CLASSES = new Set(['Facing', 'Pocket', 'RestPocket', 'AdaptivePocket', 'Roughing', 'RestRoughing', 'Contour', 'Chamfer', 'VCarve', 'Trace',
   'TrochoidalSlot', 'Drilling', 'Bore', 'Reaming', 'Tapping', 'ThreadMilling', 'Parallel', 'Waterline', 'Flat', 'Scallop', 'Pencil', 'Spiral', 'Radial',
-  'Project', 'Morph']);
+  'Project', 'Morph',
+  // A lathe setup's (camlib.turning).
+  'TurnFace', 'TurnRough', 'TurnFinish', 'TurnGroove', 'TurnPartOff', 'TurnThread', 'TurnDrill', 'TurnBoreRough', 'TurnBoreFinish', 'TurnFaceGroove']);
 
 /** Full precision, shortest round-trip form. */
 export function formatNumber(value: number): string {
@@ -91,6 +93,10 @@ export interface CamSetup {
   operations: CamOp[];
   /** Its machine(...) call in the program (the first one, when it is posted for several). */
   machine: Py | null;
+  /** A lathe setup (Setup(..., turning=...)): its operations are camlib's Turn* ones, its tools turret stations. */
+  turning: boolean;
+  /** A lathe setup's shop turret, from its tools' `station(shop.<turret>, tool)` (null: none, or more than one). */
+  turret: string | null;
 }
 
 export interface CamProgramModel {
@@ -113,6 +119,14 @@ export function toolKeyOf(value: Py | null, shop = 'shop'): string | null {
   if (!value || value.k !== 'call' || base(value.f) !== 'tool' || value.a?.length !== 1 || value.kw?.length) return null;
   const item = value.a[0];
   return item.k === 'attr' && item.name?.startsWith(`${shop}.`) && item.name.split('.').length === 2 ? item.name.split('.')[1] : null;
+}
+
+/** A lathe setup's tool: `station(shop.<turret>, <tool variable>)` as its turret's key and the variable (null: not that call). */
+export function stationOf(value: Py | null, shop = 'shop'): { turret: string; variable: string } | null {
+  if (!value || value.k !== 'call' || base(value.f) !== 'station' || value.a?.length !== 2 || value.kw?.length) return null;
+  const [turret, tool] = value.a;
+  if (turret.k !== 'attr' || !turret.name?.startsWith(`${shop}.`) || turret.name.split('.').length !== 2 || tool.k !== 'name') return null;
+  return { turret: turret.name.split('.')[1], variable: tool.name! };
 }
 
 /** The program's setups, operations, tools and links as its code says (null: it isn't a program the forms read). */
@@ -145,8 +159,9 @@ export function readProgram(outline: Outline): CamProgramModel | null {
     const toolsArg = argOf(value, 'tools', 2), opsArg = argOf(value, 'operations', 3);
     const toolsTuple = resolve(outline, toolsArg), opsTuple = resolve(outline, opsArg);
     const operations = isTuple(opsTuple) ? opsTuple!.items!.map((element, index) => opOf(outline, id, element, index)) : [];
+    const turrets = new Set((isTuple(toolsTuple) ? toolsTuple!.items! : []).map((item) => stationOf(resolve(outline, item), shop)?.turret).filter((key): key is string => !!key));
     setups.push({ variable, id, call: value, statement: statementOf(outline, variable), tools: isTuple(toolsTuple) ? toolsTuple : null, ops: isTuple(opsTuple) ? opsTuple : null,
-      operations, machine: machineOf(outline, machines, id) });
+      operations, machine: machineOf(outline, machines, id), turning: !!value.kw?.some((kw) => kw.key === 'turning'), turret: turrets.size === 1 ? [...turrets][0] : null });
   }
   return { outline, setups, job: jobCall, program: programCall, tools, part, shop };
 }
@@ -219,7 +234,12 @@ function joinTuple(tuple: Py, delimited: boolean, seps: string[], texts: string[
 
 /** The separator a new item gets: the tuple's own between items, or a line of its own when its first item has one. */
 function separator(code: string, tuple: Py, seps: string[]): string {
-  if (seps.length > 1) return seps[1].includes(',') ? seps[1] : `,${seps[1]}`;
+  if (seps.length > 1) {
+    const sep = seps[1].includes(',') ? seps[1] : `,${seps[1]}`;
+    // A comment written between the first two items is the second item's own, not every new item's.
+    if (!sep.includes('#')) return sep;
+    return sep.includes('\n') ? `,\n${' '.repeat(columnOf(code, tuple.items![1].s[0]))}` : ', ';
+  }
   const items = tuple.items ?? [];
   if (items.length && seps[0].includes('\n')) return `,\n${' '.repeat(columnOf(code, items[0].s[0]))}`;
   return ', ';

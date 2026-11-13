@@ -1,7 +1,7 @@
 # camlib-ui
 
-A local interface for [camlib](https://github.com/stevecad/camlib), the CAM engine: write a milling program in
-Python, build it, see what camlib planned, checked and released, play it back on the stock, and download its G-code.
+A local interface for [camlib](https://github.com/stevecad/camlib), the CAM engine: write a milling or a lathe program
+in Python, build it, see what camlib planned, checked and released, play it back on the stock, and download its G-code.
 
 > [!IMPORTANT]
 > **For demonstration purposes only.** camlib-ui shows what camlib does: it is not a CAM product, is not supported,
@@ -42,6 +42,14 @@ Python, build it, see what camlib planned, checked and released, play it back on
   or shows that operation's toolpath (<kbd>Alt</kbd>+click shows only that one, and again puts the others back; a
   setup's eye does all of its operations). The moves between operations go with the operation they lead to. It is a
   display choice, kept per project: the playback, the tool and the stock still run every operation.
+- **Lathes**: a lathe project (the `shaft` example) has a turned part, a shop with a lathe, its turning tools (ISO
+  inserts and holders, blades, threading inserts, drills) and its turret, and a program of camlib's turning operations
+  posted with camlib's FANUC or Centroid lathe post. The ten turning operations (face, rough, finish, groove, part
+  off, thread, drill, bore, face groove) have forms like the milling ones, every field camlib's own. The 3D view shows
+  camlib's own turned stock revolved about the spindle axis, a quarter cut away, with the tool's insert and holder in
+  the section. See
+  [docs/programs.md](docs/programs.md#lathes); [docs/machine-types.md](docs/machine-types.md) says what is there for
+  each machine type and what is planned.
 - **Player**: play, step, scrub a timeline banded by operation with findings marked, at up to 500× machine time,
   beside the posted G-code (the current line follows playback; click a line to go to its move). The stock shows each
   tool's own profile swept through the moves on a fine grid; camlib's own check grid is a toggle away.
@@ -77,8 +85,10 @@ cd web && npm ci && npm run build && cd ..
 ```
 
 Then open <http://127.0.0.1:8765>. An empty projects folder is given the examples to start from: `plate` (face,
-pocket, outline and holes, in a vise) and `cover` (an adaptive pocket that follows the stock, a recess entered by a
-ramp, the outline cut through with tabs at points). A new project can start from either.
+pocket, outline and holes, in a vise), `cover` (an adaptive pocket that follows the stock, a recess entered by a
+ramp, the outline cut through with tabs at points) and `shaft` (a lathe: a bar faced, roughed, finished, threaded and
+parted off; it needs camlib's posts, below). A new project can start from any of them. Every machine, tool, speed and
+feed in the examples is an example value, not a real machine's.
 
 `start.sh` checks that camlib-ui and camlib are installed, builds the interface if it isn't built yet, finds camlib's
 posts in `../camlib/examples` (the checkout from Install), and starts the server. `./start.sh --help` lists it all:
@@ -110,6 +120,8 @@ Tests and checks:
 
 ```sh
 pytest                          # projects, builds end to end, the API, and the viewer's stream reader against the reference
+                                # (the lathe tests post with camlib's FANUC and Centroid posts: $CAMLIB_POSTS, else
+                                # ../camlib/examples; they are skipped, and say so, when neither is there)
 ruff check camlib_ui tests
 cd web && npm run typecheck && npm test
 ```
@@ -121,7 +133,8 @@ cd web && npm run typecheck && npm test
 | `camlib_ui/build/` | A build: stage 1 (the program) and stage 2 (camlib plans, checks, posts, releases). |
 | `camlib_ui/shop.py`, `program.py`, `parts.py` | The shop as code, the program helpers, part files. |
 | `camlib_ui/stream.py`, `build/stream.py` | The playback stream's reader and writer ([docs/playback-stream.md](docs/playback-stream.md)). |
-| `camlib_ui/examples/plate/`, `cover/` | The example projects. |
+| `camlib_ui/build/turning.py` | A lathe setup as the result and the stream describe it (the bar, the part's half-section, the tools' outlines). |
+| `camlib_ui/examples/plate/`, `cover/`, `shaft/` | The example projects (`shaft`: a lathe). |
 | `web/src/` | The interface: React, three.js (react-three-fiber), CodeMirror. |
 
 ## License

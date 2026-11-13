@@ -59,6 +59,47 @@ cell holds two float32 heights: the lower and the upper bound of the stock's top
 model; the material between them is undecided at the grid's resolution). Before the first move every cell is at the
 stock's top, both bounds. The viewer draws the upper bound: the most material that may still be there.
 
+## Turned stock
+
+A lathe setup's stock is camlib's own turned stock (`camlib.turn_state.TurnStockState.stock()`): the bar is cut into
+bins along Z, and each bin holds the bounds of the bar's outer radius and of its bore's radius. Its header says so:
+
+```json
+"stock": {"kind": "turned", "z_min_mm": -60, "z_max_mm": 2, "outer_radius_mm": 20, "bore_radius_mm": 0,
+          "nx": 248, "ny": 2, "cell_mm": [0.25, 0.25], "min_mm": [-20, -20, -60], "max_mm": [20, 20, 2], "rings": []}
+```
+
+The grid is `nx` bins by two rows, in the same cells and changes as a milling grid: cell `i` (row 0) is bin `i`'s outer
+radius, cell `nx + i` (row 1) its bore radius, each a lower and an upper bound (float32, mm). Bin `i` spans
+`z_min_mm + i × cell_mm[0]` to one bin length further. Before the first move every bin is the bar: the outer radius at
+`outer_radius_mm`, the bore at `bore_radius_mm`, both bounds. `min_mm` and `max_mm` are the bar's box about the axis.
+camlib's lathe run gives the whole stock after each move rather than a delta, so a move's changes are the cells that
+differ from the move before. The viewer draws the most material that may be there (the outer radius' upper bound around
+the bore's lower bound), revolved about Z.
+
+`rings` lists the rings camlib records as certainly removed inside the material (face grooves): `[moves, z0, z1, r0,
+r1]`, each there once `moves` moves are done. The viewer doesn't draw them yet.
+
+Lathe coordinates are the work's: X is the radius from the spindle axis, Z runs along it, every move has Y 0 and arcs
+are in the `xz` plane.
+
+### Turning tools
+
+A lathe setup's tools are described for drawing only (`camlib_ui/build/turning.py`):
+
+```json
+{"id": "t_part", "name": "t_part", "number": 4, "offset": 4,
+ "turning": {"insert": "groove", "side": "outer", "hand": "right", "nose_radius_mm": 0.2,
+             "insert_outline": [[0, 0], [0, 3], [22, 3], [22, 0]], "holder_outline": [[22, 0], …], "holder_y_mm": [-10, 2]}}
+```
+
+`insert_outline` and `holder_outline` are (x, z) points relative to the point the program moves (the setup's
+`controlled_point`: each tool's imaginary tip, or its nose centre), mirrored as camlib mirrors them (x for a boring
+tool, z for a left-hand one); `holder_y_mm` is the holder's extent across the centre plane. Arcs are chords of at most
+10°. camlib checked every move with its own model of the insert, holder and body, never with these outlines. A turning
+operation carries `feed_mm_rev` (and `surface_speed_m_min`); its `feed_mm_min` is null, its `kind` is camlib's with a
+`turn_` prefix, and its `tool_number` and `length_register` are its tool's turret station and offset.
+
 ## Chunks
 
 A chunk is up to 1024 moves, compressed together. Decompressed, it is the moves one after the other:
@@ -92,6 +133,8 @@ moves along its plane's normal from its start to its end while it turns.
 A chunk may carry a keyframe: the whole grid (`nx × ny × 2` float32, lower then upper per cell) as it is before the
 chunk's first move, compressed on its own. The first chunk of a setup has one, and another is written whenever the
 cells changed since the last keyframe add up to more bytes than a keyframe.
+
+A turned stock's keyframe is the same: its `nx × 2` cells, lower then upper per cell.
 
 ## Seeking
 

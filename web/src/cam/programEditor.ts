@@ -7,7 +7,7 @@
 import { create } from 'zustand';
 import { api, type PartMesh } from '../api';
 import { findDefinition, revealIn, startBuild, toast, useApp } from '../state';
-import { fieldsLoaded, OP_BY_CLASS, setFields, type CamlibField, type CutterType, type GeometryKind, fieldNames } from './opSpecs';
+import { fieldsLoaded, OP_BY_CLASS, setFields, turningToolType, type CamlibField, type CutterType, type GeometryKind, fieldNames } from './opSpecs';
 import { freeOpId, readProgram, type CamOp, type CamProgramModel, type Outline } from './pyCode';
 import {
   deleteOp, duplicateOp, FormError, invalidOf, missingOf, newOp, newProgramCode, readOp, readSetup, reorderOps, setupContext, writeOp, writeSetup, type Geometry, type OpDraft, type SetupDraft,
@@ -143,6 +143,17 @@ const nameOf = (record: ShopRecord) => String(record.definition.name ?? record.k
 /** The tools a tool setup loads (with their T numbers and length registers), from the shop. */
 export function toolsOf(tooling: string | null): ShopTool[] {
   const setup = byKey(tooling);
+  if (setup?.kind === 'turret_setup') {
+    // A lathe's turret: each station's turning tool, its station as the T number and its offset as the register.
+    const stations = (setup.definition.stations as { tool?: unknown; station?: number; offset?: number }[] | undefined) ?? [];
+    return stations.flatMap((station) => {
+      const tool = byKey(ref(station.tool));
+      if (!tool) return [];
+      const d = tool.definition as { insert?: { type?: string }; side?: string };
+      return [{ key: tool.key, name: nameOf(tool), cutter: turningToolType(d.insert?.type, d.side), diameter: null, number: station.station ?? null,
+        register: station.offset ?? station.station ?? null, cutterKey: null, flutes: null }];
+    });
+  }
   const assignments = (setup?.definition.assignments as { assembly?: unknown; tool_number?: number; offsets?: { length_register?: number } }[] | undefined) ?? [];
   return assignments.flatMap((assignment) => {
     const assembly = byKey(ref(assignment.assembly));
@@ -188,7 +199,7 @@ export interface Pending { setup: SetupDraft; code: string }
  * invented: a tool the program hasn't used yet has no feeds here.
  */
 export interface Known { byTool: Record<string, Record<string, string>>; top: string | null }
-const TOOL_VALUES = ['feed_mm_min', 'plunge_mm_min', 'spindle_rpm', 'coolant'];
+const TOOL_VALUES = ['feed_mm_min', 'plunge_mm_min', 'spindle_rpm', 'coolant', 'feed_mm_rev', 'rpm', 'surface_speed_m_min'];
 
 export type ProgramForm =
   | {
@@ -281,6 +292,10 @@ export async function openNewOp(cls: string, setupId: string | null = null) {
   if (!setup) { toast('Add a setup first (Setups → New setup).', 'info'); return; }
   await ensureShop();
   const spec = OP_BY_CLASS[cls];
+  if (!!spec.turning !== setup.turning) {
+    toast(setup.turning ? `${setup.id} is a lathe setup: it takes turning operations (right-click it → Add turning operation).` : `${spec.label} is a turning operation: ${setup.id} isn’t a lathe setup.`, 'info');
+    return;
+  }
   const draft = newOp(cls, freeOpId(read.model, spec.prefix));
   const { tooling, workOffset } = setupContext(setup);
   const tools = toolsOf(tooling).filter((tool) => tool.cutter && spec.cutters.includes(tool.cutter));

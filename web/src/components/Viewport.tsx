@@ -21,6 +21,8 @@ import { toolpathLines } from '../cam/toolpathLines';
 import { fieldGrid, HeightStockView } from '../cam/heightStock';
 import { findingMove, severityOf, simPlan, simPosition, toolProfile, type SimPlan } from '../cam/playback';
 import type { SimReply, SimRequest } from '../cam/stockSim.worker';
+import { isTurned } from '../cam/stream';
+import { TurnedBar, TurnedStock, TurningTool } from './TurningView';
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
@@ -136,7 +138,7 @@ function chunk(geometry: THREE.BufferGeometry): [number, number, number][] {
 // ── Stock ───────────────────────────────────────────────────────────────────
 
 function StockBox({ setup }: { setup: SetupDescription }) {
-  const stock = setup.stock;
+  const stock = setup.stock?.kind === 'turned' ? null : setup.stock;
   const geometry = useMemo(() => {
     if (!stock) return null;
     const [a, b] = [stock.min_mm, stock.max_mm];
@@ -464,8 +466,11 @@ export default function Viewport() {
   // Frame the scene (isometric) when a project opens and once its geometry is in.
   const framed = useRef<string | null>(null);
   useEffect(() => {
-    const key = `${project}:${box ? 'box' : 'none'}`;
+    // Again once the stock is known (a first check or build), while the view is still the automatic one: a bar is
+    // much longer than the part turned from it.
+    const key = `${project}:${box ? 'box' : 'none'}:${setup?.stock ? 'stock' : 'part'}`;
     if (!box || framed.current === key) return;
+    if (framed.current?.startsWith(`${project}:box:`) && !viewer.autoFramed) { framed.current = key; return; }
     let frame = 0;
     // The camera's controls register inside the canvas, possibly after this runs: frame once they're there.
     const tryFrame = () => {
@@ -475,11 +480,13 @@ export default function Viewport() {
     };
     tryFrame();
     return () => cancelAnimationFrame(frame);
-  }, [project, box]);
+  }, [project, box, setup?.stock]);
   // While a form is open the part is what matters: shown solid and pickable, the stock as its box, no playback.
   const formOpen = useEditor((state) => !!state.form);
   const streaming = !!source && show.stock !== 'off' && !formOpen;
   const plan = useMemo(() => (source ? simPlan(source) : null), [source]);
+  // A lathe setup's stock is camlib's own turned stock, revolved (TurningView).
+  const turned = !!source && isTurned(source.header.stock);
   // The operations whose toolpath the browser hides (the setup playing's). The stock, the tool and the playback don't use it.
   const hiddenIds = usePaths((state) => (source ? state.setups[source.header.id]?.hidden : undefined));
   const hidden = useMemo(() => hiddenOwners(source?.header.operations.map((op) => op.id) ?? [], hiddenIds), [source, hiddenIds]);
@@ -495,13 +502,15 @@ export default function Viewport() {
         {view.showGrid && <gridHelper args={[1000, 100, '#3a4349', '#262c31']} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, (box?.min.z ?? 0) - 0.01]} raycast={() => null} />}
         {view.showOrigin && <WorkTriad size={Math.max(5, size * 0.12)} />}
         {part.mesh && (formOpen || (!view.partHidden && (show.part || !source))) && <PartView mesh={part.mesh} translucent={!!source && !formOpen} />}
-        {setup && !streaming && <StockBox setup={setup} />}
-        {source && streaming && (show.grid || !plan
-          ? <GridStock source={source} mode={show.stock as 'solid' | 'translucent'} />
-          : <DisplayStock source={source} plan={plan} mode={show.stock as 'solid' | 'translucent'} />)}
+        {setup && !streaming && (setup.stock?.kind === 'turned' ? <TurnedBar stock={setup.stock} /> : <StockBox setup={setup} />)}
+        {source && streaming && (turned
+          ? <TurnedStock source={source} mode={show.stock as 'solid' | 'translucent'} />
+          : show.grid || !plan
+            ? <GridStock source={source} mode={show.stock as 'solid' | 'translucent'} />
+            : <DisplayStock source={source} plan={plan} mode={show.stock as 'solid' | 'translucent'} />)}
         {setup?.machines[0] && show.fixtures && <Fixtures machine={setup.machines[0]} />}
         {source && show.toolpath && !formOpen && <Toolpath motion={source.motion} owners={source.owners} hidden={hidden} />}
-        {source && show.tool && !formOpen && <Tool source={source} />}
+        {source && show.tool && !formOpen && (source.header.tools.some((tool) => tool.turning) ? <TurningTool source={source} /> : <Tool source={source} />)}
         {source && !formOpen && machineResult && machineResult.findings.some((finding) => finding.move != null) && <FindingMarks source={source} machine={machineResult} size={size} hidden={hidden} />}
       </Canvas>
       <ViewCube disabled={!box} />

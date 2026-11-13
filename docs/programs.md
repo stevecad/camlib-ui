@@ -10,7 +10,8 @@ A camlib-ui project is a folder with three kinds of file:
 
 Anything else in the folder (helper modules, fixture bodies such as the example's `vise.py`) can be imported or
 referenced by these. The `plate` example (`camlib_ui/examples/plate/`) is a complete project; start from it. The
-`cover` example beside it shows an adaptive pocket on camlib's default planner, a ramp entry and tabs at points.
+`cover` example beside it shows an adaptive pocket on camlib's default planner, a ramp entry and tabs at points. The
+`shaft` example is a lathe project ([Lathes](#lathes)).
 
 ## The part
 
@@ -168,7 +169,101 @@ camlib's own name. A report longer than 256 kB is cut, and says where.
 camlib refuses what it can't do exactly (an orbit radius on the planner that follows the stock, a tab point off the
 outline, a ramp with tabs): the build then shows camlib's own message, which names the value and what to change.
 
-camlib-ui builds 3-axis milling programs. An operation the forms have no form for (camlib's `SuppliedToolpath`, whose
-moves the program gives; `Deburr`; probing) is written in the code: it is built, checked, reported and played back like
-any other, and opens in the code editor. Turning isn't built here: `machine(...)` refuses a lathe control. Controller
-posts other than LinuxCNC come from a camlib checkout's `examples/` folder (`--camlib-posts`).
+camlib-ui builds 3-axis milling programs and lathe programs ([Lathes](#lathes)). An operation the forms have no form
+for (camlib's `SuppliedToolpath`, whose moves the program gives; `Deburr`; probing) is written in the code: it is built,
+checked, reported and played back like any other, and opens in the code editor. Controller posts other than LinuxCNC
+come from a camlib checkout's `examples/` folder (`--camlib-posts`).
+
+## Lathes
+
+A lathe project is the same three files. The `shaft` example (`camlib_ui/examples/shaft/`) is a complete one: a bar
+faced, roughed, finished (a thread relief with a fillet, followed as an arc), threaded and parted off, posted with
+camlib's FANUC lathe post. Its values are example values, not a real machine's or a tool maker's.
+
+**The part** is a solid of revolution about its Z axis with its front face toward +Z. The lathe's Z is the part's Z and
+the lathe's X is the radius; the centre of the front face is the program's zero. `turned(part)` reads its half-section
+with camlib's own `camlib.cadquery.turning_section`, lines and arcs exact; camlib refuses a solid that isn't one of
+revolution (flats, cross holes, undercuts) and says why.
+
+**The shop** holds the lathe, its turning tools and its turret:
+
+```python
+model = shop.add(MachineModel.lathe("lathe_model", "Example lathe", x_travel=(0, 150), z_travel=(-400, 50),
+                                    max_rpm=4000, stations=8, rapid=8000))
+control = shop.add(Controller("control", "FANUC 0i-TF", dialect="fanuc_lathe_system_a_v1", processes=("turning",),
+                              linear_resolution_mm=0.001))
+lathe = shop.add(Machine("lathe", "Example lathe", model=model, controller=control))
+t_rough = shop.add(TurningTool("t_rough", "CCMT 12 04 08 on SCLCR 2525", side="outer", hand="right",
+                               insert=TurningInsert.iso_code("CCMT120408", holder="SCLCR2525M12"),
+                               holder=TurningHolder.rectangle(width=25, length=150, offset=0, y=(-25, 3)), seat=(0, 0)))
+turret = shop.add(Turret("turret", "Turret", tools={1: t_rough, ...}))
+```
+
+| Helper | What it is |
+|---|---|
+| `MachineModel.lathe(key, name, x_travel=, z_travel=, max_rpm=, stations=, rapid=)` | A two-axis lathe: X (the radius, away from the spindle axis toward the tool) and Z travel in machine coordinates, the work spindle's top speed, the turret's stations, the axes' rate. |
+| `TurningInsert.iso_code(code, holder= or approach_angle=)`, `.iso(...)`, `.groove(width=, depth=)`, `.face_groove(...)`, `.thread(profile_angle=, depth=)`, `.drill(diameter=, point_angle=, flute_length=)` | An insert, as camlib's `TurningInsert.iso_code`/`iso`, `GrooveInsert`, `FaceGrooveInsert`, `ThreadInsert` or `DrillInsert`. |
+| `TurningHolder.rectangle(width=, length=, offset=, y=)` | camlib's rectangular holder (`TurningHolder.rectangle`), with its extent across the centre plane. |
+| `TurningTool(key, name, insert=, side=, hand=, holder=, seat=, nose_radius=, insert_thickness=, insert_clearance=, …)` | A tool as it sits in the turret: camlib's `TurningTool`, field for field. camlib requires every value (the seat's rake and inclination, the insert's thickness and clearance unless its ISO code gives them, a blade's corner radius) and refuses a tool with one missing, by name. |
+| `Turret(key, name, tools={station: tool, station: (tool, {"offset": n})})` | The tools by turret station; a station's offset register is its own number unless it says otherwise. |
+
+Lathe controllers and their posts: `fanuc_lathe_system_a_v1` (camlib's `examples/fanuc_lathe_post.py`, G-code system A)
+and `centroid_lathe_v1` (`examples/centroid_lathe_post.py`, Centroid CNC12). Both come from `--camlib-posts`.
+
+**The program** is camlib's own lathe setup, with three helpers:
+
+```python
+from links import part, shop
+from camlib import Job, Setup, TurnFace, TurnFinish, TurnRough, TurnStockSpec, TurningSetup
+from camlib_ui.program import Program, machine, station, tool, turned
+
+rough = tool(shop.t_rough)                               # a shop TurningTool as camlib's, its id the shop key
+ops = (TurnFace("face", "t_rough", z_mm=0, feed_mm_rev=0.15, rpm=1200),
+       TurnRough("rough", "t_rough", depth_of_cut_mm=2, allowance_mm=0.3, feed_mm_rev=0.25, rpm=1200))
+setup = Setup("turn", stock=TurnStockSpec(z_min_mm=-60, z_max_mm=2, outer_radius_mm=20),
+              tools=(station(shop.turret, rough),), operations=ops, initial_position_mm=(40, 0, 30),
+              turning=TurningSetup.from_section(turned(part), chuck_z_mm=-50, clearance_mm=2, tolerance_mm=0.01))
+program = Program(Job("shaft", "1", (setup,)),
+                  machine(shop.lathe, setup, flood=True, mist=False, arcs=True, helices=False, max_sweep_rad=math.tau,
+                          max_tool_number=8, max_length_register=8, program_number=1001),
+                  accept={"unchecked_machine"})
+```
+
+| Helper | What it gives |
+|---|---|
+| `tool(shop.t_x)` | A shop `TurningTool` as camlib's `TurningTool` (a turning operation names it by its id, the shop key). |
+| `station(shop.turret, tool)` | Its turret station and offset as camlib's `TurnToolSetting`: what a lathe setup's `tools` hold. |
+| `turned(part)` | The part's half-section (`profile`, `bore`, `face_grooves`) for `TurningSetup.from_section`. |
+| `machine(shop.lathe, setup, ...)` | The shop lathe as a camlib machine with its post. No `tooling=` (the stations are the setup's), no `fixtures=` (the workholding is the setup's chuck face, `chuck_z_mm`); `work_to_machine` is optional. From the shop: the spindle's top speed, the axes' rate, units and decimals. The posts set `planes` and `tool_change_position_mode` themselves. |
+
+camlib plans a lathe setup's operations (`TurnFace`, `TurnRough`, `TurnFinish`, `TurnGroove`, `TurnPartOff`,
+`TurnThread`, `TurnDrill`, `TurnBoreRough`, `TurnBoreFinish`, `TurnFaceGroove`: camlib's `docs/operations.md`,
+"Turning") and checks every move, planned and posted, against the part, its bore, the chuck face and the stock: the
+insert, its body below the cutting face, and the holder. A move it can't make is the build's error, in camlib's own
+words (which tool, where, by how much).
+
+What a lathe build's result says:
+
+- **Not checked**: the machine's own bodies and its travel. camlib checks those only with a machine crash model
+  (camlib's `docs/machine.md`), which the shop here doesn't declare; the program accepts `unchecked_machine` on
+  purpose, and the travel is listed too. A lathe setup takes no fixtures or milling checks (camlib refuses them).
+- **Material**: camlib's comparison of the turned stock with the part, per z bin. A gouge stops the build; material
+  left (a nose radius in a corner, a roughing allowance) is reported, not refused.
+- **Operations**: each one's passes, cut length and least clearances to the part and the holder, as camlib reported.
+
+In the 3D view the bar is drawn revolved about Z, with a quarter cut away so the section and the tool in it show: it
+is camlib's own turned stock at the playback position (per 0.25 mm bin along Z, the most material that may still be
+there), with the tool's insert and holder outlines at the point the program moves. The view keeps Z up, so a lathe's
+axis stands upright. Before a build the bar is shown with the part's half-section and the chuck face (dashed).
+
+The tree lists a lathe setup and its operations from the code, and the forms edit its operations as they do a mill's:
+right-click the setup → **Add turning operation** (or the ribbon's Turning group), double-click an operation to edit
+it, drag, duplicate and delete. Every field is camlib's own, and the ones camlib requires (the feed per revolution and
+the speed among them) are required in the form. A turning operation takes no geometry: the part's half-section is the
+setup's. Its tool is chosen from the setup's turret (the tools whose insert fits the operation: a blade for a groove, a
+boring-side insert for a bore) and written as its id; a tool the program doesn't use yet gets its `tool(shop.…)` and
+its `station(...)` in the setup's tools. The milling operations aren't offered for a lathe setup, nor the turning ones
+for a mill's.
+
+The lathe **setup** itself (its bar, its chuck face, its machine) is edited in the code for now: the setup form
+writes milling setups. [machine-types.md](machine-types.md) lists what is planned.

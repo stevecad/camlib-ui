@@ -6,7 +6,7 @@
  * imports beyond the stream reader and the motion model.
  */
 import type { Finding, MachineResult, ToolSummary } from '../api';
-import { NONE, type PlaybackStream, type StreamSetup } from './stream.ts';
+import { isTurned, NONE, type PlaybackStream, type StreamSetup } from './stream.ts';
 import { alongMove, ARC_PLANES, moveStart, UNASSIGNED, type Motion } from './motion.ts';
 import { cellSizeFor, profileOf, type CutterProfile, type SimMoves } from './heightfield.ts';
 
@@ -153,6 +153,8 @@ export interface SimPlan {
  */
 export function simPlan(source: { header: StreamSetup; motion: Motion; bands: Band[] }): SimPlan | null {
   const { header, motion, bands } = source;
+  // A lathe setup shows camlib's own turned stock (the stream's): there is no height field of it to cut.
+  if (isTurned(header.stock) || header.tools.some((tool) => tool.turning)) return null;
   const cutters: CutterProfile[] = [];
   for (const tool of header.tools) {
     const profile = profileOf([toolProfile(tool).cutter]);

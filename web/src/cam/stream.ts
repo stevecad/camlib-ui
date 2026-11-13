@@ -25,13 +25,37 @@ const need = (condition: unknown, message: string): void => { if (!condition) th
 export interface Block { offset: number; length: number }
 export interface ChunkEntry { first_move: number; moves: number; offset: number; length: number; raw_length: number; start_s: number; keyframe: Block | null }
 export interface ToolShape { kind: 'flat' | 'ball' | 'bull' | 'drill' | 'chamfer' | string; corner_radius_mm?: number; point_angle_rad?: number; included_angle_rad?: number; tip_diameter_mm?: number }
+/**
+ * A turning tool (a lathe setup's): its insert's and holder's outlines as (x, z) points in lathe coordinates (x the
+ * radius, z along the spindle axis) relative to the point the program moves. For drawing only.
+ */
+export interface TurningToolShape {
+  insert: string; side: 'outer' | 'inner'; hand: 'right' | 'left'; nose_radius_mm: number;
+  insert_outline: [number, number][]; holder_outline: [number, number][]; holder_y_mm?: [number, number] | null;
+}
 export interface StreamTool {
   id: string; name: string; shape: ToolShape; diameter_mm: number; cutting_length_mm: number; overall_length_mm: number;
   shank_diameter_mm: number; flutes: number; stickout_mm: number; gauge_length_mm: number;
   holders: { z_min_mm: number; z_max_mm: number; radius_min_mm: number; radius_max_mm: number }[];
+  /** A lathe setup's tool: its turret station and offset, and its shape (the milling fields above are then absent). */
+  number?: number; offset?: number; turning?: TurningToolShape;
 }
-export interface StreamOperation { id: string; kind: string | null; type?: string | null; tool: string | null; tool_number: number | null; length_register: number | null; spindle_rpm: number | null; feed_mm_min: number | null }
-export interface StreamStock { min_mm: number[]; max_mm: number[]; nx: number; ny: number; cell_mm: number[] }
+export interface StreamOperation {
+  id: string; kind: string | null; type?: string | null; tool: string | null; tool_number: number | null; length_register: number | null; spindle_rpm: number | null; feed_mm_min: number | null;
+  /** A turning operation's feed per revolution and constant surface speed. */
+  feed_mm_rev?: number | null; surface_speed_m_min?: number | null;
+}
+/**
+ * The stock grid. A milling setup's: nx × ny columns over the stock's XY extent, each cell the bounds of the stock's
+ * top height. A lathe setup's (`kind: 'turned'`): nx bins along Z by two rows, row 0 the bounds of the bar's outer
+ * radius, row 1 of its bore's radius; `rings`: [moves done, z0, z1, r0, r1], rings removed inside the material (face
+ * grooves), each there once that many moves are done.
+ */
+export interface StreamStock {
+  min_mm: number[]; max_mm: number[]; nx: number; ny: number; cell_mm: number[];
+  kind?: 'turned'; z_min_mm?: number; z_max_mm?: number; outer_radius_mm?: number; bore_radius_mm?: number; rings?: number[][];
+}
+export const isTurned = (stock: StreamStock): boolean => stock.kind === 'turned';
 export interface StreamSetup {
   id: string; machine: string; controller: string; post: string; initial_position_mm: number[]; stock: StreamStock;
   tools: StreamTool[]; operations: StreamOperation[]; moves: number; seconds: number; chunks: ChunkEntry[];
@@ -82,6 +106,13 @@ export function parseHeader(bytes: Uint8Array): StreamHeader {
   for (const setup of header.setups) {
     const stock = setup.stock;
     need(stock && Number.isInteger(stock.nx) && Number.isInteger(stock.ny) && stock.nx * stock.ny > 0, 'Setup stock grid missing.');
+    if (stock.kind === 'turned') {
+      need(stock.ny === 2 && [stock.z_min_mm, stock.z_max_mm, stock.outer_radius_mm, stock.bore_radius_mm].every((value) => Number.isFinite(value))
+        && stock.z_min_mm! < stock.z_max_mm! && stock.bore_radius_mm! >= 0 && stock.bore_radius_mm! < stock.outer_radius_mm!, 'Bad turned stock.');
+      stock.rings ??= [];
+      need(Array.isArray(stock.rings) && stock.rings.every((ring) => Array.isArray(ring) && ring.length === 5 && Number.isInteger(ring[0]) && ring[0] >= 0
+        && ring[0] <= setup.moves && ring.every((value) => Number.isFinite(value))), 'Bad turned stock rings.');
+    } else need(stock.kind === undefined || (stock.kind as string) === 'grid', 'Unknown stock kind.');
     setup.restarts ??= [];
     need(Array.isArray(setup.restarts) && setup.restarts.every((item, index) => Array.isArray(item) && item.length === 4 && Number.isInteger(item[0]) && item[0] >= 0 && item[0] < setup.moves
       && item.slice(1).every((value) => Number.isFinite(value)) && (index === 0 || item[0] > setup.restarts![index - 1][0])), 'Bad restarts.');
@@ -187,9 +218,11 @@ export function applyMoves(grid: Float32Array, chunk: MoveChunk, from: number, t
   }
 }
 
-/** The stock before any move: every cell's both bounds at the stock's top. */
+/** The stock before any move: every cell's both bounds at the stock's top (a bar: its outer radius, then its bore's). */
 export function initialGrid(setup: StreamSetup): Float32Array {
-  return new Float32Array(setup.stock.nx * setup.stock.ny * 2).fill(setup.stock.max_mm[2]);
+  const stock = setup.stock;
+  if (isTurned(stock)) return new Float32Array(stock.nx * 4).fill(stock.outer_radius_mm!, 0, stock.nx * 2).fill(stock.bore_radius_mm!, stock.nx * 2);
+  return new Float32Array(stock.nx * stock.ny * 2).fill(stock.max_mm[2]);
 }
 
 /** The chunk that holds move n − 1 (the first whose first_move + moves ≥ n; chunk 0 for n = 0). */
@@ -209,8 +242,19 @@ export function keyframeFor(setup: StreamSetup, c: number): number {
   return -1;
 }
 
-/** Remaining stock volume (mm³) of a grid by each cell's upper and lower top height: [upper, lower]. */
+/**
+ * Remaining stock volume (mm³) of a grid, [upper, lower]: by each cell's upper and lower top height, or for a turned
+ * stock by each z bin's ring between its bore and its outer radius (the most: the outer radius' upper bound around the
+ * bore's lower bound).
+ */
 export function volume(setup: StreamSetup, grid: Float32Array): [number, number] {
+  if (isTurned(setup.stock)) {
+    const n = setup.stock.nx, dz = setup.stock.cell_mm[0];
+    const ring = (outer: number, inner: number) => Math.PI * Math.max(0, outer * outer - inner * inner) * dz;
+    let upper = 0, lower = 0;
+    for (let i = 0; i < n; i++) { upper += ring(grid[2 * i + 1], grid[2 * (n + i)]); lower += ring(grid[2 * i], grid[2 * (n + i) + 1]); }
+    return [upper, lower];
+  }
   const bottom = setup.stock.min_mm[2], area = setup.stock.cell_mm[0] * setup.stock.cell_mm[1];
   let upper = 0, lower = 0;
   for (let i = 0; i < grid.length; i += 2) { lower += Math.max(0, grid[i] - bottom); upper += Math.max(0, grid[i + 1] - bottom); }

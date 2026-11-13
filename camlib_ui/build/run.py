@@ -53,6 +53,10 @@ GCODE = re.compile(r"gcode-([1-9]|[12][0-9]|3[0-2])\.nc")
 ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 CONFIG_KEYS = {"stock", "tools", "operations", "initial_position_mm", "sweep", "verification", "tool_change",
                "rapid_retracts", "revision"}
+# A lathe setup's configuration (camlib Setup(turning=...)): its operations and tools are its turning definition's.
+TURNING_KEYS = {"stock", "tools", "turning", "initial_position_mm", "sweep", "revision"}
+NO_TRAVEL = "machine travel (a lathe setup: checked only with a machine crash model)"
+MAX_MATERIAL_FINDINGS = 64   # a lathe material report's per-bin findings kept in result.json (its totals are whole)
 MAX_BODIES = 256           # fixture and protected bodies per machine scene
 BODY_KEYS = {"id", "role", "footprint", "z_min_mm", "z_max_mm", "z_error_mm"}
 NO_FIXTURES = "fixtures (no fixtures declared)"   # unchecked: the travel was checked, no fixture was
@@ -154,14 +158,23 @@ def load_program(data):
         _need(isinstance(setup["id"], str) and ID.fullmatch(setup["id"]) and setup["id"] not in seen, "setup id")
         seen.add(setup["id"])
         config = setup["config"]
-        _need(isinstance(config, dict) and set(config) <= CONFIG_KEYS, "setup configuration (milling only)")
+        _need(isinstance(config, dict), "setup configuration")
+        if "turning" in config:
+            turning = config["turning"]
+            _need(set(config) <= TURNING_KEYS and isinstance(turning, dict), "lathe setup configuration")
+            _need(isinstance(turning.get("tools"), list) and len(turning["tools"]) == len(config.get("tools") or ())
+                  and all(isinstance(t, dict) and isinstance(t.get("tool"), dict) for t in turning["tools"]),
+                  "turning tools")
+        else:
+            _need(set(config) <= CONFIG_KEYS, "setup configuration")
         _need(config.get("revision") == job["revision"], "setup revision")
         _need(isinstance(config.get("tools"), list) and 0 < len(config["tools"]) <= 64, "tools")
-        _need(isinstance(config.get("operations"), list) and 0 < len(config["operations"]) <= 256, "operations")
+        operations = operations_of(config)
+        _need(isinstance(operations, list) and 0 < len(operations) <= 256, "operations")
         _need(all(isinstance(t, dict) and isinstance(t.get("id"), str) and ID.fullmatch(t["id"]) for t in config["tools"]),
               "tool ids")
         _need(all(isinstance(o, dict) and isinstance(o.get("id"), str) and ID.fullmatch(o["id"])
-                  for o in config["operations"]), "operation ids")
+                  for o in operations), "operation ids")
         frame = setup["frame"]
         _need(isinstance(frame, dict) and set(frame) == {"origin_mm", "x", "y", "z"}
               and all(_finite_point(frame[k]) for k in frame), "frame")
@@ -193,6 +206,15 @@ def load_program(data):
     return CompiledJob(job["id"], job["revision"], tuple(compiled)), rebuilt, frozenset(accept), notes
 
 
+def operations_of(config):
+    """A setup configuration's operations: its own, or a lathe setup's turning definition's."""
+    return config["turning"].get("operations") if "turning" in config else config.get("operations")
+
+
+def is_turning(setup):
+    return "turning" in setup.config
+
+
 def _target(entry, setup):
     """One machine of a setup, rebuilt from data with the post named in it (camlib_ui.program.POSTS)."""
     from camlib.post import ToolSetting
@@ -204,8 +226,15 @@ def _target(entry, setup):
     _need(isinstance(entry["name"], str) and 0 < len(entry["name"]) <= 128, "machine name")
     _need(isinstance(entry["values"], dict) and len(entry["values"]) <= 128, "machine values")
     values = {str(k): decode(v) for k, v in entry["values"].items()}
-    _need("work_to_machine" in values, "machine work_to_machine (the program states it; never a default)")
-    scene = _scene_data(entry["scene"])
+    turning = POSTS[entry["post"]].process == "turning"
+    _need(turning == is_turning(setup), "a lathe setup is posted with a lathe post, and only it")
+    if turning:
+        # camlib checks a lathe setup against its part, bore, chuck face and stock: no scene, no travel box.
+        _need(entry["scene"] == {"travel_mm": None, "bodies": []}, "lathe machine scene (none)")
+        scene = dict(travel_mm=None, bodies=())
+    else:
+        _need("work_to_machine" in values, "machine work_to_machine (the program states it; never a default)")
+        scene = _scene_data(entry["scene"])
     lowering = decode(entry["lowering"])
     gauges = {t["id"]: t.get("gauge_length_mm") for t in setup.config["tools"]}
     tools = entry["tools"]
@@ -265,6 +294,12 @@ def scene_of(setup, target):
     import hashlib
     from camlib.verification import MachineLimits, Options, Scene
     from camlib_ui.program import BEAM_PROCESSES, POSTS
+    if is_turning(setup):
+        # A lathe setup takes no milling checks (camlib refuses them): every move is checked by the turning planner and
+        # by the posted program's replay against the part, the bore, the chuck face and the stock.
+        turning = setup.config["turning"]
+        return None, dict(travel_mm=None, work_to_machine=dataclasses.asdict(target.machine.work_to_machine), fixtures=[],
+                          protected=[], bodies=[], chuck_z_mm=turning.get("chuck_z_mm"))
     config = dict(setup.config.get("verification") or {})
     if config.get("scene"):
         raise ValueError(f"Setup {setup.id} configures its own camlib Scene: the machine's travel and fixtures come from "
@@ -309,7 +344,9 @@ def unchecked_on(scene, unchecked):
     """camlib's unchecked checks, plus what the scene left out: travel is always checked here (the shop's), fixtures
     only when the program placed some, which is said rather than claimed."""
     out = [u for u in unchecked]
-    if not scene["fixtures"]:
+    if scene["travel_mm"] is None:
+        out.append(NO_TRAVEL)   # a lathe: its chuck face is checked (the setup's), its travel isn't
+    elif not scene["fixtures"]:
         out.append(NO_FIXTURES)
     return out
 
@@ -342,18 +379,26 @@ def _operation_summary(op):
                 feed_mm_min=op.get("feed_mm_min"))
 
 
+def _summaries(config):
+    """(tools, operations, stock) of a setup as the result and the playback stream describe them."""
+    if "turning" in config:
+        from camlib_ui.build import turning
+        return (turning.tool_summaries(config["turning"]), turning.operation_summaries(config["turning"]),
+                turning.stock_summary(config))
+    stock = config["stock"]
+    return ([_tool_summary(t) for t in config["tools"]], [_operation_summary(o) for o in config["operations"]],
+            dict(min_mm=stock.get("min_mm"), max_mm=stock.get("max_mm"), cell_size_mm=stock.get("cell_size_mm"))
+            if isinstance(stock, dict) else None)
+
+
 def describe(compiled, targets, accept):
     """The program as compiled: setups, their stock, tools, operations and machines (no planning)."""
     setups = []
     for setup in compiled.setups:
-        config = setup.config
-        stock = config["stock"]
+        tools, operations, stock = _summaries(setup.config)
         setups.append(dict(
-            id=setup.id,
-            stock=dict(min_mm=stock.get("min_mm"), max_mm=stock.get("max_mm"), cell_size_mm=stock.get("cell_size_mm"))
-            if isinstance(stock, dict) else None,
-            tools=[_tool_summary(t) for t in config["tools"]],
-            operations=[_operation_summary(o) for o in config["operations"]],
+            id=setup.id, process="turning" if is_turning(setup) else "milling", stock=stock, tools=tools,
+            operations=operations,
             machines=[dict(machine=t.key, controller=t.controller, post=t.post, units=t.machine.output_units,
                            decimals=t.machine.decimals, from_shop=sorted(t.derived), scene=scene_of(setup, t)[1])
                       for t in targets[setup.id]],
@@ -447,7 +492,10 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
             reports[update.operation] = update.report
         progress.on_operation(update)
     options = dict(machine=target.machine, post=target.post_class, decoder=target.decoder_class,
-                   verification=verification, on_operation=on_operation)
+                   on_operation=on_operation)
+    turning = is_turning(setup)
+    if not turning:
+        options["verification"] = verification
     # camlib's planning progress, where this camlib has it (#198): transient, the run is the same with or without it.
     if progress.engine:
         options.update(on_progress=progress.on_progress, progress_interval_s=INTERVAL_S)
@@ -463,17 +511,18 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
             raise TimeoutError(f"setup {setup.id!r} for {target.key} didn't finish in the build's time")
         planned_s = time.monotonic() - clock_start
         config = setup.config
-        order = [o["id"] for o in config["operations"]]
+        order = [o["id"] for o in operations_of(config)]
         operations = {op: dict(id=op, moves=0, cut_mm=0.0, rapid_mm=0.0, seconds=0.0) for op in order}
         count = status["available"]
         progress.stage("playback")
         state = stock_state(run.wait_ready()) if stream is not None else None
         writer = None
         if stream is not None:
-            from camlib_ui.build.stream import SetupStream
-            writer = SetupStream(stream, setup.id, state, tools=[_tool_summary(t) for t in config["tools"]],
-                                 operations=[_operation_summary(o) for o in config["operations"]], machine=target.key,
-                                 controller=target.controller, post=target.post)
+            from camlib_ui.build.stream import SetupStream, TurnedSetupStream
+            tools, summaries, _ = _summaries(config)
+            writer = (TurnedSetupStream if turning else SetupStream)(
+                stream, setup.id, state, tools=tools, operations=summaries, machine=target.key,
+                controller=target.controller, post=target.post)
         for index in range(count):
             frame = run.read_chunk(index)
             start, end = run.motion_time(index)
@@ -497,7 +546,10 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
                     line = nc[0]["number"] if nc else None
                 except (KeyError, IndexError, TypeError):
                     line = None
-                writer.add(motion, changes, changed, end - start, line)
+                if turning:
+                    writer.add_turned(motion, state.stock(), end - start, line)
+                else:
+                    writer.add(motion, changes, changed, end - start, line)
         posting = run.posting_status()
         remaining = None
         if state is not None:
@@ -513,7 +565,8 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
         except ExportRefused as refused:
             findings = list(refused.findings)
             result.update(gcode=None, refused=str(refused), refused_kinds=list(refused.statuses))
-            unchecked = list(missing(run._verification_config()))
+            unchecked = list(missing(run._verification_config(), turning=turning))
+            exported = None
         else:
             findings = list(exported["findings"])
             result.update(gcode=Path(artifact).name, refused=None, accepted=list(exported["accepted"]))
@@ -521,6 +574,13 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
         unchecked = unchecked_on(scene, unchecked)
         checks = run.verification_status(sample_limit=0)
         material = checks.get("material")
+        if turning:
+            # A lathe program's material check is camlib's comparison of the replayed stock with the part: the release's
+            # own (camlib's export), else the one a refusal carries as its finding.
+            material = (exported or {}).get("material") or next(
+                (item for f in findings for item in f.get("findings") or [] if isinstance(item, dict) and "residual" in item
+                 and "gouge" in item), None)
+            material = _turned_material(material)
         counts = {}
         for entry in findings:
             counts[entry["status"]] = counts.get(entry["status"], 0) + 1
@@ -533,6 +593,15 @@ def _post(job, setup, target, clock, *, stream=None, program_accept=frozenset(),
                 item[key] = round(item[key], 3)
             item["report"] = bounded_report(reports.get(item["id"]))
         return result, [operations[op] for op in order] + [v for k, v in operations.items() if k not in order], writer
+
+
+def _turned_material(report):
+    """camlib's lathe material report for result.json: whole, but for its per-bin findings past MAX_MATERIAL_FINDINGS
+    (their count is kept; the totals in `gouge` and `residual` are camlib's own and complete)."""
+    if not isinstance(report, dict):
+        return None
+    listed = list(report.get("findings") or [])
+    return {**report, "findings": listed[:MAX_MATERIAL_FINDINGS], "findings_total": len(listed)}
 
 
 def _motion(frame):
@@ -623,7 +692,7 @@ def _stage2(data, mode, clock, started, timings, work, job_dir, progress):
                             raise ValueError(f"A build posts at most {MAX_PROGRAMS} programs (setups × machines).")
                         artifact = f"gcode-{len(programs) + 1}.nc"
                         progress.begin_run(setup.id, target.key, len(programs), runs,
-                                           [(o["id"], o.get("kind")) for o in setup.config["operations"]])
+                                           [(o["id"], o.get("kind")) for o in operations_of(setup.config)])
                         result, operations, writer = _post(job, setup, target, clock,
                                                            stream=body if position == 0 else None,
                                                            program_accept=accept, artifact=artifact, progress=progress)

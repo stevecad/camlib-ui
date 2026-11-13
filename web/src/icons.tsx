@@ -31,6 +31,12 @@ export const ParallelFinishIcon = make(<><path d="M3 19h18" opacity={0.45} /><pa
 export const WaterlineIcon = make(<><path d="M3 20h18" opacity={0.45} /><path d="M5 20c0-8.5 3-13.5 7-13.5s7 5 7 13.5" /><path d="M7 16h10M8.2 12.5h7.6M9.8 9.5h4.4" opacity={0.65} /></>, 'Waterline');
 export const ToolpathIcon = make(<><path d="M4 6h14a2 2 0 0 1 0 4H6a2 2 0 0 0 0 4h12a2 2 0 0 1 0 4H4" /></>, 'Toolpath');
 export const SimulateToolIcon = make(<><path d="M4 18h16" /><path d="M9 4h6v6l-3 4-3-4Z" /><path d="M5 18c1-3 3-4 7-4s6 1 7 4" opacity={0.6} /></>, 'SimulateTool');
+// Turning: the bar (its axis left to right) and what the tool does to it.
+export const TurnIcon = make(<><path d="M3 9h9v-2h9v8h-9" opacity={0.55} /><path d="M3 15h9" opacity={0.55} /><path d="M3 12h18" strokeDasharray="1.6 1.6" opacity={0.4} /><path d="m12 15 2.5 5h-5Z" /></>, 'Turn');
+export const TurnFaceIcon = make(<><path d="M3 7h14v10H3" opacity={0.55} /><path d="M3 12h18" strokeDasharray="1.6 1.6" opacity={0.4} /><path d="M17 3v18" /><path d="m17 17 4 1.5v-5Z" /></>, 'TurnFace');
+export const TurnGrooveIcon = make(<><path d="M3 8h7v4h4V8h7" opacity={0.6} /><path d="M3 16h18" opacity={0.6} /><path d="M11 12V3h2v9" /></>, 'TurnGroove');
+export const TurnThreadIcon = make(<><path d="M3 9l2-2 2 2 2-2 2 2 2-2 2 2h6" opacity={0.6} /><path d="M3 15h18" opacity={0.6} /><path d="m9 9 2-6h-4Z" /></>, 'TurnThread');
+export const TurnBoreIcon = make(<><path d="M21 5H9v4h8" opacity={0.6} /><path d="M21 19H9v-4h8" opacity={0.6} /><path d="M3 12h18" strokeDasharray="1.6 1.6" opacity={0.4} /><path d="M21 12.5h-7l-1.5-3" /></>, 'TurnBore');
 export const PostIcon = make(<><path d="M6 3h9l4 4v14H6Z" /><path d="M9 11h2M13 11h2M9 14h6M9 17h4" /></>, 'Post');
 
 
@@ -48,6 +54,10 @@ const OP_ICONS: Record<string, ReturnType<typeof make>> = {
   Bore: BoreIcon, Reaming: DrillOpIcon, Tapping: DrillOpIcon, ThreadMilling: DrillOpIcon, Parallel: ParallelFinishIcon, Waterline: WaterlineIcon,
   Scallop: ParallelFinishIcon, Pencil: ParallelFinishIcon, Spiral: ParallelFinishIcon, Radial: ParallelFinishIcon, Project: EngraveIcon,
   Morph: ParallelFinishIcon, Flat: FaceMillIcon,
+  TurnFace: TurnFaceIcon, TurnRough: TurnIcon, TurnFinish: TurnIcon, TurnGroove: TurnGrooveIcon, TurnPartOff: TurnGrooveIcon, TurnFaceGroove: TurnGrooveIcon,
+  TurnThread: TurnThreadIcon, TurnDrill: DrillOpIcon, TurnBoreRough: TurnBoreIcon, TurnBoreFinish: TurnBoreIcon,
+  turn_face: TurnFaceIcon, turn_rough: TurnIcon, turn_finish: TurnIcon, turn_groove: TurnGrooveIcon, turn_part_off: TurnGrooveIcon, turn_face_groove: TurnGrooveIcon,
+  turn_thread: TurnThreadIcon, turn_drill: DrillOpIcon, turn_bore_rough: TurnBoreIcon, turn_bore_finish: TurnBoreIcon,
 };
 export const OpIcon = ({ kind, size = 14 }: { kind: string | null; size?: number }) => {
   const Icon = (kind && OP_ICONS[kind]) || ToolpathIcon;

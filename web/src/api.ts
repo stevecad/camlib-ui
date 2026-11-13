@@ -24,20 +24,36 @@ export interface ToolSummary {
   id: string; name: string; shape: { kind: string; corner_radius_mm?: number; point_angle_rad?: number; included_angle_rad?: number; tip_diameter_mm?: number };
   diameter_mm: number; cutting_length_mm: number; overall_length_mm: number; shank_diameter_mm: number; flutes: number;
   stickout_mm: number; gauge_length_mm: number; holders: { z_min_mm: number; z_max_mm: number; radius_min_mm: number; radius_max_mm: number }[];
+  /** A lathe setup's tool (camlib_ui/build/turning.py): its turret station and offset and its outlines; the milling fields above are then absent. */
+  number?: number; offset?: number; turning?: import('./cam/stream').TurningToolShape;
 }
 export interface OperationSummary {
   id: string; kind: string | null; tool: string | null; tool_number: number | null; length_register: number | null;
   spindle_rpm: number | null; feed_mm_min: number | null;
+  /** A turning operation's feed per revolution and constant surface speed. */
+  feed_mm_rev?: number | null; surface_speed_m_min?: number | null;
+}
+/** A milling setup's stock box and check grid. */
+export interface BoxStock { kind?: undefined; min_mm: number[]; max_mm: number[]; cell_size_mm: number }
+/**
+ * A lathe setup's bar (camlib's TurnStockSpec) with the part's half-section, (radius, z, bulge) points from the front
+ * face on the axis toward the chuck, its bore's, and the chuck face. `min_mm`/`max_mm`: the bar's box about the axis.
+ */
+export interface TurnedStock {
+  kind: 'turned'; min_mm: number[]; max_mm: number[]; z_min_mm: number; z_max_mm: number; outer_radius_mm: number; bore_radius_mm: number;
+  cell_mm: number; profile: number[][]; bore: number[][]; chuck_z_mm: number | null;
 }
 export interface SceneBody { id: string; role: 'fixture' | 'protected_target'; z_min_mm: number; z_max_mm: number; outlines: number[][][] }
 export interface Scene {
   /** The spindle gauge line's travel (machine coordinates), and each tool's own tip travel: that box lowered by its gauge length. */
-  travel_mm: number[][]; tool_tip_travel_mm?: Record<string, number[][]>; work_to_machine: { origin_mm: number[]; x: number[]; y: number[]; z: number[] };
+  travel_mm: number[][] | null; tool_tip_travel_mm?: Record<string, number[][]>; work_to_machine: { origin_mm: number[]; x: number[]; y: number[]; z: number[] };
   fixtures: string[]; protected: string[]; bodies: SceneBody[];
+  /** A lathe setup: the chuck face every move is checked against (its travel is null: camlib checks none). */
+  chuck_z_mm?: number | null;
 }
 export interface MachineDescription { machine: string; controller: string; post: string; units: string; decimals: number; from_shop: string[]; scene: Scene }
 export interface SetupDescription {
-  id: string; stock: { min_mm: number[]; max_mm: number[]; cell_size_mm: number } | null;
+  id: string; process?: 'milling' | 'turning'; stock: BoxStock | TurnedStock | null;
   tools: ToolSummary[]; operations: OperationSummary[]; machines: MachineDescription[];
 }
 export interface ProgramDescription { id: string; revision: string; setups: SetupDescription[]; accept: string[] }

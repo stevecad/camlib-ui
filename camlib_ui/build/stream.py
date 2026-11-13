@@ -52,16 +52,12 @@ class SetupStream:
 
     def __init__(self, body, setup_id, state, *, tools, operations, machine, controller, post):
         self.body, self.setup_id = body, setup_id
-        self.nx, self.ny = state.nx, state.ny
-        self.min_mm, self.max_mm = tuple(state.min_mm), tuple(state.max_mm)
         self.tools, self.operations = list(tools), list(operations)
+        self._begin(state)
         self.tool_index = {t["id"]: i for i, t in enumerate(self.tools)}
         self.operation_index = {o["id"]: i for i, o in enumerate(self.operations)}
         self.meta = dict(id=setup_id, machine=machine, controller=controller, post=post,
                          initial_position_mm=[float(v) for v in state.position])
-        # The grid as the viewer keeps it: each cell's lower and upper bound of the stock's top height (float32),
-        # starting as camlib's stock does (full block: both at the stock top).
-        self.grid = numpy.full((self.nx * self.ny, 2), self.max_mm[2], dtype="<f4")
         self.keyframe_raw = self.grid.nbytes
         self.since_keyframe = math.inf
         self.chunks, self.pending, self.pending_bytes = [], [], 0
@@ -71,8 +67,24 @@ class SetupStream:
         self.restarts = []
         self.chunk_first, self.chunk_start_s, self.chunk_keyframe = 0, 0.0, None
 
+    def _begin(self, state):
+        """The grid as the viewer keeps it: each cell's lower and upper bound of the stock's top height (float32),
+        starting as camlib's stock does (full block: both at the stock top)."""
+        self.nx, self.ny = state.nx, state.ny
+        self.min_mm, self.max_mm = tuple(state.min_mm), tuple(state.max_mm)
+        self.grid = numpy.full((self.nx * self.ny, 2), self.max_mm[2], dtype="<f4")
+
     def add(self, motion, changes, count, duration_s, line):
         """One move: camlib's motion dict, its packed stock delta (`count` cells), nominal duration and first G-code line."""
+        cells = numpy.empty(count, dtype=CELL)
+        if count:
+            delta = numpy.frombuffer(changes, dtype=DELTA, count=count)
+            cells["index"], cells["lower"], cells["upper"] = delta["index"], delta["lower"], delta["upper"]
+        self._add(motion, cells, duration_s, line)
+
+    def _add(self, motion, cells, duration_s, line):
+        """One move with the cells it changes (CELL records: index and the new lower and upper bounds)."""
+        count = len(cells)
         if not self.pending:
             self._start_chunk()
         curve = motion["curve"]
@@ -91,11 +103,8 @@ class SetupStream:
         feed = motion.get("feed_mm_min")
         record.append(TAIL.pack(math.nan if feed is None else float(feed), float(duration_s), int(line or 0), int(count)))
         if count:
-            delta = numpy.frombuffer(changes, dtype=DELTA, count=count)
-            cells = numpy.empty(count, dtype=CELL)
-            cells["index"], cells["lower"], cells["upper"] = delta["index"], delta["lower"], delta["upper"]
-            self.grid[delta["index"], 0] = cells["lower"]
-            self.grid[delta["index"], 1] = cells["upper"]
+            self.grid[cells["index"], 0] = cells["lower"]
+            self.grid[cells["index"], 1] = cells["upper"]
             record.append(cells.tobytes())
         data = b"".join(record)
         self.pending.append(data)
@@ -125,12 +134,57 @@ class SetupStream:
         self.body.write(packed)
         self.pending, self.pending_bytes = [], 0
 
+    def _stock(self):
+        return dict(min_mm=list(self.min_mm), max_mm=list(self.max_mm), nx=self.nx, ny=self.ny,
+                    cell_mm=[(self.max_mm[0] - self.min_mm[0]) / self.nx, (self.max_mm[1] - self.min_mm[1]) / self.ny])
+
     def finish(self):
         self._finish_chunk()
-        stock = dict(min_mm=list(self.min_mm), max_mm=list(self.max_mm), nx=self.nx, ny=self.ny,
-                     cell_mm=[(self.max_mm[0] - self.min_mm[0]) / self.nx, (self.max_mm[1] - self.min_mm[1]) / self.ny])
-        return dict(self.meta, stock=stock, tools=self.tools, operations=self.operations, moves=self.moves,
+        return dict(self.meta, stock=self._stock(), tools=self.tools, operations=self.operations, moves=self.moves,
                     seconds=round(self.seconds, 6), restarts=self.restarts, chunks=self.chunks)
+
+
+class TurnedSetupStream(SetupStream):
+    """A lathe setup's moves with the turned stock each one leaves (docs/playback-stream.md, "Turned stock"): camlib's
+    own stock of the run, per z bin the bounds of the bar's outer radius and of its bore's radius. The grid is `nx` z
+    bins by two rows: row 0 the outer radius (lower, upper), row 1 the bore radius (lower, upper). camlib's lathe run
+    gives the whole stock after each move, not a delta: the cells that differ from the move before are the change."""
+
+    def _begin(self, state):
+        stock = state.stock()
+        spec, cells = stock["spec"], stock["cells"]
+        self.spec = dict(z_min_mm=float(spec["z_min_mm"]), z_max_mm=float(spec["z_max_mm"]),
+                         outer_radius_mm=float(spec["outer_radius_mm"]), bore_radius_mm=float(spec.get("bore_radius_mm", 0)))
+        self.nx, self.ny = len(cells), 2
+        self.grid = self._cells(stock)
+        self.rings, self.ring_count = [], len(stock.get("rings") or [])
+
+    def _cells(self, stock):
+        cells = stock["cells"]
+        grid = numpy.empty((2 * len(cells), 2), dtype="<f4")
+        for row, side in enumerate(("outer", "inner")):
+            grid[row * len(cells):(row + 1) * len(cells), 0] = [c[side]["lower_mm"] for c in cells]
+            grid[row * len(cells):(row + 1) * len(cells), 1] = [c[side]["upper_mm"] for c in cells]
+        return grid
+
+    def add_turned(self, motion, stock, duration_s, line):
+        """One move: camlib's motion dict and the turned stock after it (TurnStockState.stock())."""
+        after = self._cells(stock)
+        changed = numpy.flatnonzero((after != self.grid).any(axis=1))
+        cells = numpy.empty(len(changed), dtype=CELL)
+        cells["index"], cells["lower"], cells["upper"] = changed, after[changed, 0], after[changed, 1]
+        self._add(motion, cells, duration_s, line)
+        # Rings certainly removed inside the material (face grooves): each is there from the move that made it on.
+        rings = stock.get("rings") or []
+        for ring in rings[self.ring_count:]:
+            self.rings.append([self.moves, *(float(v) for v in ring)])
+        self.ring_count = len(rings)
+
+    def _stock(self):
+        r, spec = self.spec["outer_radius_mm"], self.spec
+        cell = (spec["z_max_mm"] - spec["z_min_mm"]) / self.nx
+        return dict(kind="turned", **spec, nx=self.nx, ny=2, cell_mm=[cell, cell],
+                    min_mm=[-r, -r, spec["z_min_mm"]], max_mm=[r, r, spec["z_max_mm"]], rings=self.rings)
 
 
 def write(path, setups, body_path, *, camlib):

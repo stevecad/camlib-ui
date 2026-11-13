@@ -530,3 +530,152 @@ def Preset(key: str, name: str, **fields) -> Item:
 def Post(key: str, name: str, **fields) -> Item:
     """A custom post processor (library kind post_processor); built-in posts come with executable controllers."""
     return Item(key, {"name": name, **fields}, kind="post_processor")
+
+
+# ---------------------------------------------------------------- lathes
+# A lathe in the shop: its model (MachineModel.lathe), its turning tools and the turret that holds them. Every value is
+# camlib's own (camlib.turning: TurningTool, TurningInsert, TurningHolder, TurningSeat, TurnToolSetting), written here so
+# a program reaches the tools as shop items; camlib_ui.program.tool() and station() map them field for field.
+
+class TurningInsert:
+    """A turning tool's insert, for TurningTool(insert=...): one of camlib's kinds, with camlib's own values (none has a
+    default)."""
+
+    @staticmethod
+    def iso_code(code: str, *, holder: str | None = None, approach_angle: float | None = None) -> dict:
+        """An ISO 1832 insert ("CNMG120408") on a holder: its ISO 5608 designation (`holder`, "PCLNR2525M12", which gives
+        the approach angle) or the approach angle in degrees (camlib TurningInsert.iso_code)."""
+        if (holder is None) == (approach_angle is None):
+            raise TypeError("TurningInsert.iso_code: give holder= (an ISO 5608 designation) or approach_angle= (degrees).")
+        insert = {"type": "iso_code", "code": str(code)}
+        if holder is not None:
+            insert["holder_code"] = str(holder)
+        else:
+            insert["approach_angle_deg"] = float(approach_angle)
+        return insert
+
+    @staticmethod
+    def iso(*, included_angle: float, approach_angle: float, edge_length: float, nose_radius: float) -> dict:
+        """A nose between two edges (camlib TurningInsert.iso): the included angle (80 C, 55 D, 35 V), the holder's
+        approach angle, in degrees; the edge length and nose radius in mm."""
+        return {"type": "iso", "included_angle_deg": float(included_angle), "approach_angle_deg": float(approach_angle),
+                "edge_length_mm": float(edge_length), "nose_radius_mm": float(nose_radius)}
+
+    @staticmethod
+    def groove(*, width: float, depth: float) -> dict:
+        """A grooving or parting blade (camlib GrooveInsert): its width and how deep it reaches, mm."""
+        return {"type": "groove", "width_mm": float(width), "depth_mm": float(depth)}
+
+    @staticmethod
+    def face_groove(*, width: float, depth: float) -> dict:
+        """A face grooving blade (camlib FaceGrooveInsert): its width across and how deep it reaches, mm."""
+        return {"type": "face_groove", "width_mm": float(width), "depth_mm": float(depth)}
+
+    @staticmethod
+    def thread(*, profile_angle: float, depth: float) -> dict:
+        """A threading insert (camlib ThreadInsert): its profile angle (60 metric and UN) and its reach beyond the nose."""
+        return {"type": "thread", "profile_angle_deg": float(profile_angle), "depth_mm": float(depth)}
+
+    @staticmethod
+    def drill(*, diameter: float, point_angle: float, flute_length: float) -> dict:
+        """A drill on the spindle axis (camlib DrillInsert): diameter, point angle (degrees) and flute length."""
+        return {"type": "drill", "diameter_mm": float(diameter), "point_angle_deg": float(point_angle),
+                "flute_length_mm": float(flute_length)}
+
+
+class TurningHolder:
+    """A turning tool's holder, for TurningTool(holder=...)."""
+
+    @staticmethod
+    def rectangle(*, width: float, length: float, offset: float, y: tuple[float, float]) -> dict:
+        """camlib's rectangular holder (TurningHolder.rectangle): outside, a shank `width` along Z and `length` away
+        from the cut, starting `offset` behind the insert's reach; a boring bar `width` across, its top `offset` under
+        the nose centre, `length` out of the bore; a drill's chuck. `y`: its extent across the centre plane, (low, high)
+        mm (an outside shank from its height below the cutting face up to its clamp)."""
+        low, high = (float(v) for v in y)
+        return {"shape": "rectangle", "width_mm": float(width), "length_mm": float(length), "offset_mm": float(offset),
+                "y_mm": [low, high]}
+
+
+class TurningTool(Item):
+    """A turning tool as it sits in the turret (kind turning_tool): its insert (TurningInsert.…), the side it cuts
+    ("outer", or "inner" for a boring tool) and its hand ("right": cuts toward the chuck), its holder
+    (TurningHolder.rectangle) and, as camlib requires them, its body off the centre plane: `seat` (rake, inclination in
+    degrees: the holder's catalogue page; not for a drill), `insert_thickness` and `insert_clearance` (mm, degrees; an
+    ISO-coded insert has its code's), a blade's `front_clearance` and `side_clearance`, a face grooving blade's
+    `curved_for_diameter` (its maker's (min, max) range). `nose_radius`: the corner radius of a blade or threading
+    insert, 0 for a drill (an ISO insert states its own). Nothing has a default: camlib refuses a tool with a value
+    missing, by name."""
+    kind = "turning_tool"
+
+    def __init__(self, key: str, name: str, *, insert: dict, side: str, hand: str, holder: dict,
+                 nose_radius: float | None = None, seat: tuple[float, float] | None = None,
+                 insert_thickness: float | None = None, insert_clearance: float | None = None,
+                 front_clearance: float | None = None, side_clearance=None,
+                 curved_for_diameter: tuple[float, float] | None = None, size_tolerance: tuple[float, float] | None = None,
+                 **fields):
+        if not isinstance(insert, dict) or "type" not in insert:
+            raise TypeError(f"Turning tool {key}: insert must be a TurningInsert.… (iso_code, iso, groove, thread, drill).")
+        if not isinstance(holder, dict) or holder.get("shape") != "rectangle":
+            raise TypeError(f"Turning tool {key}: holder must be a TurningHolder.rectangle(...).")
+        if side not in ("outer", "inner") or hand not in ("right", "left"):
+            raise ValueError(f"Turning tool {key}: side is \"outer\" or \"inner\", hand \"right\" or \"left\".")
+        definition = {"name": name, "insert": dict(insert), "side": side, "hand": hand, "holder": dict(holder)}
+        optional = {"nose_radius_mm": nose_radius, "insert_thickness_mm": insert_thickness,
+                    "insert_clearance_deg": insert_clearance, "insert_front_clearance_deg": front_clearance,
+                    "insert_side_clearance_deg": side_clearance,
+                    "seat": None if seat is None else {"rake_deg": float(seat[0]), "inclination_deg": float(seat[1])},
+                    "curved_for_diameter_mm": None if curved_for_diameter is None else [float(v) for v in curved_for_diameter],
+                    "insert_size_tolerance_mm": None if size_tolerance is None else [float(v) for v in size_tolerance]}
+        definition.update({k: v for k, v in optional.items() if v is not None})
+        super().__init__(key, {**definition, **fields})
+
+
+class Turret(Item):
+    """The turning tools in a lathe's turret, by station: {1: tool, 2: (tool, {"offset": 12})} (kind turret_setup). A
+    station's offset register is its own number unless it says otherwise (the T word is T<station><offset>, T0101)."""
+    kind = "turret_setup"
+
+    def __init__(self, key: str, name: str, *, tools: dict[int, Any], **fields):
+        stations = []
+        for number, entry in sorted((tools or {}).items()):
+            tool, extra = (entry if isinstance(entry, tuple) else (entry, {}))
+            if not isinstance(tool, Item) or tool.kind != "turning_tool":
+                raise TypeError(f"Turret {key}: station {number} must be a TurningTool item of this shop.")
+            if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+                raise ValueError(f"Turret {key}: stations are numbered from 1.")
+            stations.append({"station": number, "tool": tool, "offset": int(dict(extra).get("offset", number))})
+        if not stations:
+            raise ValueError(f"Turret {key}: load at least one tool.")
+        super().__init__(key, {"name": name, "stations": stations, **fields})
+
+
+def _lathe_model(cls, key: str, name: str, *, x_travel: tuple[float, float], z_travel: tuple[float, float],
+                 max_rpm: float, stations: int, rapid: float, acceleration: float = 500, description: str = "") -> "MachineModel":
+    """A two-axis lathe: the cross slide's X travel (min, max) in mm as a radius from the spindle axis (X+ away from the
+    axis, toward the tool: camlib's lathe premise) and the carriage's Z travel (min, max) along it, in machine
+    coordinates; the work spindle's top speed; the turret's stations; rapid in mm/min. camlib has no default for any of
+    them."""
+    (x0, x1), (z0, z1) = (tuple(float(v) for v in x_travel), tuple(float(v) for v in z_travel))
+    if not (x0 < x1 and z0 < z1):
+        raise ValueError("A lathe's travel is (min, max) in X (radius) and in Z, min below max.")
+    if not isinstance(stations, int) or isinstance(stations, bool) or stations < 1:
+        raise ValueError("A turret needs a whole number of stations, at least 1.")
+
+    def axis(nid, parent, direction, low, high):
+        return {"id": nid, "parent": parent, "kind": "linear", "frame": IDENTITY, "axis": direction,
+                "limits": {"unit": "mm", "minimum": low, "maximum": high, "max_velocity_per_minute": rapid,
+                           "max_acceleration_per_second2": acceleration}, "periodic": False}
+    nodes = [{"id": "base", "parent": None, "kind": "fixed", "frame": IDENTITY, "axis": None, "limits": None, "periodic": False},
+             axis("Z", "base", [0.0, 0.0, 1.0], z0, z1), axis("X", "Z", [1.0, 0.0, 0.0], x0, x1)]
+    return cls(key, name, description=description, machine_type="lathe", processes=["turning"], nodes=nodes,
+               attachments=[{"id": "chuck", "node": "base", "role": "workpiece", "frame": IDENTITY, "interface": None},
+                            {"id": "turret", "node": "X", "role": "tool", "frame": IDENTITY, "interface": None}],
+               spindles=[{"id": "main", "role": "work", "attachment": "chuck", "min_rpm": 0, "max_rpm": float(max_rpm),
+                          "reversible": True}],
+               tool_change={"mode": "turret", "stations": [{"id": f"station_{n}", "attachment": "turret"}
+                                                           for n in range(1, stations + 1)]})
+
+
+MachineModel.lathe = classmethod(_lathe_model)
+__all__ += ["TurningInsert", "TurningHolder", "TurningTool", "Turret"]

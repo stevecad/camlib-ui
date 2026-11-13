@@ -1,5 +1,5 @@
 /**
- * The milling operations the program forms write (from STEVE Studio's camlibOps.ts), one spec per camlib operation: its
+ * The milling and turning operations the program forms write (from STEVE Studio's camlibOps.ts), one spec per camlib operation: its
  * label and group, the shop cutters it takes, what geometry it takes from the part, and how each of camlib's fields
  * shows. camlib's own fields (their order, type and default) come from the installed camlib (GET /api/operation-fields,
  * camlib_ui/forms.py), so the forms match the camlib that builds. A required field (no default in camlib) is required in
@@ -7,7 +7,22 @@
  */
 
 /** Shop cutter types (shop.py's cutters: rotary_cutter cutter_type). */
-export type CutterType = 'flat_end_mill' | 'ball_end_mill' | 'bull_end_mill' | 'drill' | 'chamfer_mill' | 'face_mill' | 'reamer' | 'tap' | 'thread_mill' | 'boring_bar';
+export type CutterType = 'flat_end_mill' | 'ball_end_mill' | 'bull_end_mill' | 'drill' | 'chamfer_mill' | 'face_mill' | 'reamer' | 'tap' | 'thread_mill' | 'boring_bar' | TurningToolType;
+/**
+ * A shop turning tool (shop.py's TurningTool) by what it cuts: its insert's kind and, where it matters, the side it
+ * cuts on (an outside tool, or a boring tool cutting outward in a hole).
+ */
+export type TurningToolType = 'turn_outer' | 'turn_inner' | 'groove_outer' | 'groove_inner' | 'thread_outer' | 'thread_inner' | 'face_groove' | 'turn_drill';
+/** A shop turning tool's type from its insert's type and its side (null: an insert the forms don't know). */
+export function turningToolType(insert: string | undefined, side: string | undefined): TurningToolType | null {
+  const inner = side === 'inner';
+  if (insert === 'iso' || insert === 'iso_code') return inner ? 'turn_inner' : 'turn_outer';
+  if (insert === 'groove') return inner ? 'groove_inner' : 'groove_outer';
+  if (insert === 'thread') return inner ? 'thread_inner' : 'thread_outer';
+  if (insert === 'face_groove') return 'face_groove';
+  if (insert === 'drill') return 'turn_drill';
+  return null;
+}
 
 /**
  * Geometry an operation takes from the part, and the camlib_ui.program helper each is written as:
@@ -16,7 +31,7 @@ export type CutterType = 'flat_end_mill' | 'ball_end_mill' | 'bull_end_mill' | '
  */
 export type GeometryKind = 'region' | 'surface' | 'holes' | 'paths' | 'path' | 'point';
 
-export type Group = '2D' | 'Holes' | '3D';
+export type Group = '2D' | 'Holes' | '3D' | 'Turning';
 
 export interface OpSpec {
   cls: string;
@@ -30,6 +45,8 @@ export interface OpSpec {
   geometry: Record<string, GeometryKind>;
   /** The id prefix of a new one. */
   prefix: string;
+  /** A lathe setup's operation (camlib.turning): its tool is a turret tool named by its id, with no geometry to pick. */
+  turning?: boolean;
 }
 
 const MILLS: CutterType[] = ['flat_end_mill', 'bull_end_mill', 'face_mill'];
@@ -61,6 +78,17 @@ export const OP_SPECS: OpSpec[] = [
   { cls: 'Project', label: 'Project', group: '3D', prefix: 'project', cutters: BALL, geometry: { surface: 'surface', paths: 'paths' }, about: 'Follow the picked edges on the part’s surface with the ball resting on it.' },
   { cls: 'Morph', label: 'Morph', group: '3D', prefix: 'morph', cutters: BALL, geometry: { surface: 'surface', from_path: 'path', to_path: 'path' }, about: 'Passes blended between two edge chains, on the surface.' },
   { cls: 'Flat', label: 'Flat areas', group: '3D', prefix: 'flat', cutters: ['flat_end_mill'], geometry: { surface: 'surface' }, about: 'Finish every flat area of the part at its exact height with a flat end mill.' },
+  // Lathe setups (camlib.turning): the part's half-section is the setup's, so none of them takes geometry.
+  { cls: 'TurnFace', label: 'Face', group: 'Turning', prefix: 'face', turning: true, cutters: ['turn_outer'], geometry: {}, about: 'Passes across the front of the bar, past the axis, down to a Z.' },
+  { cls: 'TurnRough', label: 'Rough', group: 'Turning', prefix: 'rough', turning: true, cutters: ['turn_outer'], geometry: {}, about: 'Axial passes down to the part plus an allowance, with a pass at every diameter of the profile.' },
+  { cls: 'TurnFinish', label: 'Finish', group: 'Turning', prefix: 'finish', turning: true, cutters: ['turn_outer'], geometry: {}, about: 'Follow the whole profile from the front face, arcs as arcs, the nose a radius outside it.' },
+  { cls: 'TurnGroove', label: 'Groove', group: 'Turning', prefix: 'groove', turning: true, cutters: ['groove_outer', 'groove_inner'], geometry: {}, about: 'Plunge a grooving blade across a groove that is in the profile (or, with a boring-side blade, in the bore).' },
+  { cls: 'TurnPartOff', label: 'Part off', group: 'Turning', prefix: 'part_off', turning: true, cutters: ['groove_outer'], geometry: {}, about: 'Plunge a parting blade to the axis at the part’s back face.' },
+  { cls: 'TurnThread', label: 'Thread', group: 'Turning', prefix: 'thread', turning: true, cutters: ['thread_outer', 'thread_inner'], geometry: {}, about: 'Single-point threading: spindle-synchronized passes of constant chip area.' },
+  { cls: 'TurnDrill', label: 'Drill', group: 'Turning', prefix: 'drill', turning: true, cutters: ['turn_drill'], geometry: {}, about: 'Drill on the spindle axis to a Z, in full-retract pecks if set. The hole must be in the part’s bore.' },
+  { cls: 'TurnBoreRough', label: 'Bore rough', group: 'Turning', prefix: 'bore_rough', turning: true, cutters: ['turn_inner'], geometry: {}, about: 'Open the hole already there in axial passes, up to the bore less an allowance.' },
+  { cls: 'TurnBoreFinish', label: 'Bore finish', group: 'Turning', prefix: 'bore_finish', turning: true, cutters: ['turn_inner'], geometry: {}, about: 'Follow the bore from the front face to a Z, arcs as arcs.' },
+  { cls: 'TurnFaceGroove', label: 'Face groove', group: 'Turning', prefix: 'face_groove', turning: true, cutters: ['face_groove'], geometry: {}, about: 'Axial plunges across an annular groove in the front face (declared on the setup: face_grooves).' },
 ];
 
 export const OP_BY_CLASS: Record<string, OpSpec> = Object.fromEntries(OP_SPECS.map((spec) => [spec.cls, spec]));
@@ -158,6 +186,15 @@ export const FIELD_VIEW: Record<string, FieldView> = {
   bottom_clearance_mm: v('Clearance below', 'options', MM), chip_break_lift_mm: v('Chip-break lift', 'options', MM), reentry_clearance_mm: v('Re-entry clearance', 'options', MM),
   max_stay_down_mm: v('Longest link at depth', 'options', MM), orbit_radius_mm: v('Orbit radius', 'options', MM), boundary_clockwise: v('Boundary clockwise', 'options'),
   require_part_at_first_depth: v('Part at the first depth', 'options'), omit_empty_cuts: v('Skip empty cuts', 'options'), sample_mm: v('Sample every', 'options', MM),
+  // Turning (camlib.turning): radii are from the spindle axis, Z along it.
+  z_mm: v('At Z', 'heights', MM, 'Facing: the Z it faces down to. Parting: the part’s back face.'),
+  z_from_mm: v('From Z', 'heights', MM), z_to_mm: v('To Z', 'heights', MM), z_start_mm: v('Starts at Z', 'heights', MM, 'Where the thread’s diameter starts.'),
+  z_end_mm: v('Ends at Z', 'heights', MM), bottom_radius_mm: v('Bottom radius', 'heights', MM, 'The groove’s bottom, as a radius from the axis.'),
+  major_radius_mm: v('Major radius', 'geometry', MM, 'Half the thread’s major diameter.'), depth_mm: v('Thread depth', 'geometry', MM, 'Radial, from the major radius to the root.'),
+  depth_of_cut_mm: v('Depth of cut', 'passes', MM), allowance_mm: v('Allowance', 'passes', MM, 'Stock left on the part.'), retract_mm: v('Retract', 'passes', MM, 'How far each pass pulls off at 45° before it returns.'),
+  overlap_mm: v('Overlap of plunges', 'passes', MM), passes: v('Passes', 'passes'), infeed_angle_deg: v('Infeed angle', 'passes', DEG, 'The flank the passes feed down (29.5° for a 60° thread).'),
+  feed_mm_rev: v('Feed', 'cutting', 'mm/rev'), rpm: v('Spindle speed', 'cutting', 'rpm', 'With a surface speed set: the spindle’s limit (G50).'),
+  surface_speed_m_min: v('Surface speed', 'cutting', 'm/min', 'Constant surface speed (G96). Needs the setup’s feed_per_rev=True.'),
   // Option objects' own fields
   angle_deg: v('Ramp angle', 'options', DEG), radius_mm: v('Radius', 'options', MM), height_mm: v('Height', 'options', MM), count: v('Count', 'options'),
   spacing_mm: v('Spacing', 'options', MM), shape: v('Shape', 'options', undefined, undefined, [['triangle', 'Triangle'], ['rectangle', 'Rectangle']]),
@@ -213,12 +250,19 @@ const kindOf = (name: string, type: string, geometry: GeometryKind | undefined):
   return 'text';
 };
 
+/** How a turning operation shows fields whose names milling uses for something else. */
+const TURNING_VIEW: Record<string, FieldView> = {
+  inner_radius_mm: v('Inner radius', 'heights', MM), outer_radius_mm: v('Outer radius', 'heights', MM), bottom_z_mm: v('Bottom Z', 'heights', MM),
+  depth_z_mm: v('Depth (Z)', 'heights', MM, 'Where the drill’s tip stops.'), pitch_mm: v('Pitch', 'geometry', MM),
+  compensation: v('Nose compensation', 'options', undefined, 'Wear: posted with G41/G42, so the control applies the wear in the offset’s nose radius.', [['computer', 'In the program'], ['wear', 'Wear (G41/G42)']]),
+};
+
 /** A camlib class's fields as the form shows them (an operation's, or an option object's). */
 export function fieldsOf(cls: string): FieldInfo[] {
   const spec = OP_BY_CLASS[cls];
   return (FIELDS[cls] ?? []).map(([key, type, initial], index) => {
     const geometry = spec?.geometry[key];
-    const view = FIELD_VIEW[key] ?? v(key, 'advanced');
+    const view = (spec?.turning ? TURNING_VIEW[key] : undefined) ?? FIELD_VIEW[key] ?? v(key, 'advanced');
     return { ...view, key, kind: kindOf(key, type, geometry), required: initial === null, initial, optional: type.endsWith('| None') || initial === 'None', geometry, index };
   });
 }

@@ -8,7 +8,7 @@
 import { fieldNames, fieldsOf, HIDDEN, NESTED, OP_BY_CLASS, type GeometryKind } from './opSpecs.ts';
 import {
   applyEdits, argOf, base, byCode, columnOf, formatCall, freeName, freeOpId, HELPERS, importEdits, insertItem, itemColumn, pyString, removeItem, reorderItems,
-  resolve, setKeyword, type CamOp, type CamProgramModel, type CamSetup, type Edit, type Outline, type Py,
+  resolve, setKeyword, stationOf, type CamOp, type CamProgramModel, type CamSetup, type Edit, type Outline, type Py,
 } from './pyCode.ts';
 
 /**
@@ -109,6 +109,12 @@ export function readOp(model: CamProgramModel, op: CamOp): { draft: OpDraft | nu
   const each = (key: string, value: Py) => {
     const label = fieldsOf(op.cls!).find((field) => field.key === key)?.label ?? key;
     if (key === 'id') { if (value.k !== 'str') problems.push('Its id is code'); return; }
+    if (key === 'tool' && spec.turning) {
+      // A turning operation names its tool by id: the shop key of a tool(shop.…) the program makes.
+      if (value.k === 'str' && Object.values(model.tools).includes(value.v as string)) draft.tool = value.v as string;
+      else problems.push('Its tool isn’t the id of a tool(shop.…) of the program');
+      return;
+    }
     if (key === 'tool') {
       const name = value.k === 'name' ? value.name! : null;
       if (name && model.tools[name]) draft.tool = model.tools[name];
@@ -214,6 +220,7 @@ function emitGeometry(geometry: Geometry, kind: GeometryKind, part: string): str
 
 /** The camlib classes and camlib-ui helpers an operation's code uses (for its imports). */
 export function usesOf(draft: OpDraft): { camlib: string[]; helpers: string[] } {
+  if (OP_BY_CLASS[draft.cls]?.turning) return { camlib: [draft.cls], helpers: [] };
   const camlib = [draft.cls], helpers = ['slot', 'tool'];
   const nested = (item: Nested) => { if (item.cls) camlib.push(item.cls); Object.values(item.nested).forEach(nested); };
   Object.values(draft.nested).forEach(nested);
@@ -228,6 +235,11 @@ export function usesOf(draft: OpDraft): { camlib: string[]; helpers: string[] } 
 /** The operation's call as code, at `column` (wrapped under its parenthesis past 118 columns). */
 export function emitOp(draft: OpDraft, ctx: { toolVar: string; tooling: string; part: string; shop: string; workOffset: number; column: number }): string {
   const spec = OP_BY_CLASS[draft.cls];
+  if (spec.turning) {
+    // camlib's turning operations name their tool by its id (the shop key); its station and offset are the setup's.
+    const values = fieldsOf(draft.cls).filter((field) => !HIDDEN.has(field.key) && (draft.values[field.key] ?? '').trim()).map((field) => `${field.key}=${draft.values[field.key].trim()}`);
+    return formatCall(draft.cls, [pyString(draft.id.trim()), pyString(draft.tool ?? ''), ...values], Math.max(0, ctx.column));
+  }
   const parts = [pyString(draft.id.trim()), ctx.toolVar];
   for (const field of fieldsOf(draft.cls)) {
     if (HIDDEN.has(field.key)) continue;
@@ -249,6 +261,8 @@ export function emitOp(draft: OpDraft, ctx: { toolVar: string; tooling: string; 
 
 /** What a setup's operations are written with: its tool setup and work offset, from its machine(...) call. */
 export function setupContext(setup: CamSetup): { tooling: string | null; workOffset: number } {
+  // A lathe setup's tools are its own turret stations (station(shop.<turret>, tool)); its machine takes no tooling.
+  if (setup.turning) return { tooling: setup.turret, workOffset: 1 };
   const tooling = setup.machine?.kw?.find((kw) => kw.key === 'tooling')?.value;
   const offset = setup.machine?.kw?.find((kw) => kw.key === 'work_offset')?.value.v;
   return { tooling: tooling?.k === 'attr' ? tooling.name!.split('.').pop()! : null, workOffset: typeof offset === 'number' ? offset : 1 };
@@ -271,6 +285,27 @@ function toolEdits(code: string, model: CamProgramModel, setup: CamSetup, key: s
   return { edits, variable };
 }
 
+/**
+ * The edits that give a lathe setup a turret tool: the program's `<variable> = tool(shop.<key>)` and the setup's
+ * `station(shop.<turret>, <variable>)` in its tools.
+ */
+function stationEdits(code: string, model: CamProgramModel, setup: CamSetup, key: string, turret: string): Edit[] {
+  const edits: Edit[] = [];
+  let variable = Object.entries(model.tools).find(([, item]) => item === key)?.[0] ?? null;
+  if (!variable) {
+    variable = freeName(model.outline, key);
+    const before = statementAt(model.outline, setup.ops?.s[0] ?? setup.call.s[0]) ?? setup.statement;
+    const at = Math.min(before?.s[0] ?? 0, setup.statement?.s[0] ?? Infinity);
+    edits.push({ at: [at, at], text: `${variable} = tool(${model.shop}.${key})\n` });
+  }
+  const held = (setup.tools?.items ?? []).some((item) => stationOf(resolve(model.outline, item), model.shop)?.variable === variable);
+  if (!held) {
+    if (!setup.tools) throw new FormError('This setup’s tools are code the forms can’t change: add the tool’s station(...) in code.');
+    edits.push(insertItem(code, setup.tools, `station(${model.shop}.${turret}, ${variable})`));
+  }
+  return edits;
+}
+
 export class FormError extends Error {}
 
 /** The code with an operation added to a setup (at `index`, its end by default) or rewritten in place (`op`). */
@@ -279,14 +314,18 @@ export function writeOp(code: string, model: CamProgramModel, setupId: string, d
   if (!setup) throw new FormError(`The program has no setup ${setupId}.`);
   if (!setup.ops) throw new FormError('This setup’s operations are code the forms can’t change: edit it in code.');
   const { tooling, workOffset } = setupContext(setup);
-  if (!tooling) throw new FormError('This setup’s machine has no tool setup (tooling=shop.…): set it in the setup.');
+  const turning = !!OP_BY_CLASS[draft.cls]?.turning;
+  if (turning !== setup.turning) throw new FormError(setup.turning ? `${draft.cls} is a milling operation: ${setup.id} is a lathe setup.` : `${draft.cls} is a turning operation: ${setup.id} isn’t a lathe setup.`);
+  if (!tooling) throw new FormError(turning ? 'This setup’s tools name no one turret (station(shop.<turret>, tool)): add the tool in code.' : 'This setup’s machine has no tool setup (tooling=shop.…): set it in the setup.');
   if (!draft.tool) throw new FormError('Pick a tool.');
   const others = model.setups.flatMap((item) => item.operations).filter((item) => item !== op).map((item) => item.id);
   if (others.includes(draft.id.trim())) throw new FormError(`Another operation is already called ${draft.id.trim()}.`);
   if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(draft.id.trim())) throw new FormError('A name is letters, digits and _ . : - only.');
-  const { edits, variable } = toolEdits(code, model, setup, draft.tool);
+  const { edits, variable } = turning ? { edits: stationEdits(code, model, setup, draft.tool, tooling), variable: '' } : toolEdits(code, model, setup, draft.tool);
   const uses = usesOf(draft);
-  edits.push(...importEdits(model.outline, { camlib: uses.camlib, [HELPERS]: uses.helpers }));
+  // A tool new to the program brings the helpers that make it and seat it.
+  const added = turning && edits.length ? ['station', 'tool'] : [];
+  edits.push(...importEdits(model.outline, { camlib: uses.camlib, [HELPERS]: [...uses.helpers, ...added] }));
   if (op?.call) {
     const text = emitOp(draft, { toolVar: variable, tooling, part: model.part, shop: model.shop, workOffset, column: columnOf(code, op.call.s[0]) });
     edits.push({ at: op.call.s, text });

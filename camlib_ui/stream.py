@@ -108,8 +108,12 @@ class Reader:
         return out
 
     def initial(self, setup):
-        top = float(setup["stock"]["max_mm"][2])
-        return array("f", [top]) * (setup["stock"]["nx"] * setup["stock"]["ny"] * 2)
+        stock = setup["stock"]
+        if stock.get("kind") == "turned":   # the bar: every bin's outer radius, then every bin's bore radius
+            return (array("f", [float(stock["outer_radius_mm"])]) * (stock["nx"] * 2)
+                    + array("f", [float(stock["bore_radius_mm"])]) * (stock["nx"] * 2))
+        top = float(stock["max_mm"][2])
+        return array("f", [top]) * (stock["nx"] * stock["ny"] * 2)
 
     def stock_at(self, setup, move):
         """The grid after `move` moves (0: the stock before the first), found as the viewer finds it: the chunk that
@@ -131,8 +135,16 @@ class Reader:
 
 
 def volume(setup, grid):
-    """Remaining stock volume (mm³) of a grid, by each cell's upper and lower top height: (upper, lower) bounds."""
+    """Remaining stock volume (mm³) of a grid: (upper, lower) bounds. A milling grid by each cell's upper and lower top
+    height; a turned stock by each z bin's ring between its bore and its outer radius (the most material: the outer
+    radius' upper bound around the bore's lower bound; the least: the other two)."""
     stock = setup["stock"]
+    if stock.get("kind") == "turned":
+        n, dz = stock["nx"], stock["cell_mm"][0]
+        ring = lambda outer, inner: math.pi * max(0.0, outer * outer - inner * inner) * dz
+        upper = sum(ring(grid[2 * i + 1], grid[2 * (n + i)]) for i in range(n))
+        lower = sum(ring(grid[2 * i], grid[2 * (n + i) + 1]) for i in range(n))
+        return upper, lower
     bottom = float(stock["min_mm"][2])
     area = stock["cell_mm"][0] * stock["cell_mm"][1]
     lower = sum(max(0.0, grid[i] - bottom) for i in range(0, len(grid), 2)) * area
@@ -149,6 +161,18 @@ def check(data: bytes) -> dict:
         stock = setup.get("stock") or {}
         _need(isinstance(stock.get("nx"), int) and isinstance(stock.get("ny"), int) and stock["nx"] * stock["ny"] > 0,
               "Setup stock grid missing.")
+        if stock.get("kind") == "turned":
+            number = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+            _need(stock["ny"] == 2 and all(number(stock.get(k)) for k in ("z_min_mm", "z_max_mm", "outer_radius_mm",
+                                                                         "bore_radius_mm"))
+                  and stock["z_min_mm"] < stock["z_max_mm"] and 0 <= stock["bore_radius_mm"] < stock["outer_radius_mm"],
+                  "Bad turned stock.")
+            rings = stock.get("rings") or []
+            _need(isinstance(rings, list) and all(
+                isinstance(r, list) and len(r) == 5 and isinstance(r[0], int) and 0 <= r[0] <= setup.get("moves", 0)
+                and all(number(v) for v in r[1:]) for r in rings), "Bad turned stock rings.")
+        else:
+            _need(stock.get("kind") in (None, "grid"), "Unknown stock kind.")
         restarts = setup.get("restarts") or []   # absent in a stream written before restarts: none
         _need(isinstance(restarts, list) and all(
             isinstance(r, list) and len(r) == 4 and isinstance(r[0], int) and not isinstance(r[0], bool)

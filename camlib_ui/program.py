@@ -32,7 +32,7 @@ import math
 import re
 
 __all__ = ["solid", "face", "faces", "part_target", "region", "silhouette", "hole_centers", "surface", "paths", "path", "tool", "slot",
-           "head", "cutting", "fixture", "protected", "machine", "Program", "Target", "POSTS"]
+           "station", "turned", "head", "cutting", "fixture", "protected", "machine", "Program", "Target", "POSTS"]
 
 _ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 
@@ -396,8 +396,11 @@ def _upper(lo, hi, radii):
 def tool(item):
     """A shop Tool (tool_assembly: cutter, holder stack, stick-out) → camlib ToolAssembly with the same key as its id:
     the cutter field for field, the gauge length from the stick-out and the holders' output frames, the holder
-    envelope from their outer profiles."""
+    envelope from their outer profiles. A shop TurningTool (turning_tool) → camlib TurningTool with the same key as its
+    id, field for field (its insert, side, hand, holder and body off the centre plane)."""
     from camlib.tools import ToolAssembly
+    if getattr(item, "kind", None) == "turning_tool":
+        return _turning_tool(item)
     d = _definition(item, "tool_assembly")
     if not _ID.fullmatch(item.key):
         raise ShopMappingError(f"Tool key {item.key!r} isn't a camlib id (letters, digits, _ . - only).")
@@ -429,6 +432,98 @@ def slot(tooling, assembly):
         raise ShopMappingError(f"Tool setup {tooling.key}: T{a['tool_number']} has no length register; give it "
                                "(ToolSetup(..., tools={n: (tool, {\"offsets\": {\"length_register\": n}})})).")
     return dict(tool_number=int(a["tool_number"]), length_register=int(register))
+
+
+# ---------------------------------------------------------------------------------------------------------- turning
+# Lathes (camlib's Setup(turning=TurningSetup(...)), docs/operations.md "Turning"): the shop's turning tools as camlib's,
+# their turret stations, and the part's half-section. Every tool value is the shop's; camlib refuses a tool with a value
+# missing, by name.
+
+def _insert(key, d):
+    """A shop turning tool's insert as camlib's (camlib.turning), and its nose radius where the insert states it."""
+    import camlib
+    insert = d.get("insert") or {}
+    kind = insert.get("type")
+    try:
+        if kind == "iso_code":
+            if "holder_code" in insert:
+                return camlib.TurningInsert.iso_code(insert["code"], holder=insert["holder_code"])
+            return camlib.TurningInsert.iso_code(insert["code"], approach_angle_deg=insert["approach_angle_deg"])
+        if kind == "iso":
+            return camlib.TurningInsert.iso(included_angle_deg=insert["included_angle_deg"],
+                                            approach_angle_deg=insert["approach_angle_deg"],
+                                            edge_length_mm=insert["edge_length_mm"], nose_radius_mm=insert["nose_radius_mm"])
+        if kind == "groove":
+            return camlib.GrooveInsert(insert["width_mm"], insert["depth_mm"])
+        if kind == "face_groove":
+            return camlib.FaceGrooveInsert(insert["width_mm"], insert["depth_mm"])
+        if kind == "thread":
+            return camlib.ThreadInsert(insert["profile_angle_deg"], insert["depth_mm"])
+        if kind == "drill":
+            return camlib.DrillInsert(insert["diameter_mm"], insert["point_angle_deg"], insert["flute_length_mm"])
+    except KeyError as error:
+        raise ShopMappingError(f"Turning tool {key}: its {kind} insert has no {error.args[0]}.") from None
+    raise ShopMappingError(f"Turning tool {key}: insert type {kind!r} isn't one of camlib's (iso_code, iso, groove, "
+                           "face_groove, thread, drill).")
+
+
+def _turning_tool(item):
+    """A shop TurningTool → camlib TurningTool (id = the shop key): every value the shop's, none assumed."""
+    import camlib
+    d = _definition(item, "turning_tool")
+    key = item.key
+    if not _ID.fullmatch(key):
+        raise ShopMappingError(f"Tool key {key!r} isn't a camlib id (letters, digits, _ . - only).")
+    insert = _insert(key, d)
+    # An ISO insert states its nose radius (its corner's); a blade, threading insert or drill takes the shop's.
+    nose = d.get("nose_radius_mm", getattr(insert, "nose_radius_mm", None) if isinstance(insert, camlib.InsertOutline) else None)
+    if nose is None:
+        raise ShopMappingError(f"Turning tool {key} has no nose_radius_mm (a blade's or threading insert's corner radius; "
+                               "0 for a drill).")
+    h = d.get("holder") or {}
+    missing = [k for k in ("width_mm", "length_mm", "offset_mm", "y_mm") if h.get(k) is None]
+    if h.get("shape") != "rectangle" or missing:
+        raise ShopMappingError(f"Turning tool {key}: its holder needs TurningHolder.rectangle(width=, length=, offset=, y=)"
+                               + (f" (missing {', '.join(missing)})." if missing else "."))
+    holder = camlib.TurningHolder.rectangle(insert=insert, nose_radius_mm=nose, side=d["side"], width_mm=h["width_mm"],
+                                            length_mm=h["length_mm"], offset_mm=h["offset_mm"], y_mm=tuple(h["y_mm"]))
+    body = {}
+    if d.get("seat") is not None:
+        body["seat"] = camlib.TurningSeat(d["seat"]["rake_deg"], d["seat"]["inclination_deg"])
+    for name in ("insert_thickness_mm", "insert_clearance_deg", "insert_front_clearance_deg", "insert_side_clearance_deg"):
+        if d.get(name) is not None:
+            body[name] = d[name]
+    for name in ("curved_for_diameter_mm", "insert_size_tolerance_mm"):
+        if d.get(name) is not None:
+            body[name] = tuple(d[name])
+    try:
+        return camlib.TurningTool(key, insert=insert, nose_radius_mm=nose, side=d["side"], hand=d["hand"], holder=holder,
+                                  **body)
+    except (TypeError, ValueError) as error:
+        raise ShopMappingError(f"Turning tool {key}: {error}") from error
+
+
+def station(turret, tool):
+    """A turning tool's station in a shop Turret as camlib's TurnToolSetting(tool, number, offset): what a lathe
+    Setup's tools are (Setup(tools=(station(shop.turret, cnmg), ...), turning=...)). The T word is T<station><offset>."""
+    import camlib
+    d = _definition(turret, "turret_setup")
+    key = getattr(tool, "id", tool)
+    found = [s for s in d.get("stations") or [] if getattr(s.get("tool"), "key", None) == key]
+    if len(found) != 1:
+        raise ShopMappingError(f"Turret {turret.key} holds tool {key} {len(found)} times; it must hold it once.")
+    if not isinstance(tool, camlib.TurningTool):
+        raise ShopMappingError(f"station(shop.{turret.key}, tool) takes the camlib tool, tool(shop.{key}).")
+    return camlib.TurnToolSetting(tool, int(found[0]["station"]), int(found[0]["offset"]))
+
+
+def turned(link):
+    """The linked part's half-section as camlib reads it (camlib.cadquery.turning_section): its `profile`, `bore` and
+    `face_grooves`, lines and arcs exact, for TurningSetup.from_section(turned(part), chuck_z_mm=..., ...). The part is
+    a solid of revolution about its Z axis, its front face toward +Z (the lathe's Z; work X is the radius); camlib
+    refuses any other solid (flats, cross holes, undercuts) and says why."""
+    from camlib.cadquery import turning_section
+    return turning_section(solid(link))
 
 
 # ---------------------------------------------------------------------------------------------------------- cutting
@@ -799,11 +894,13 @@ POSTS = {p.name: p for p in (
          fixed=(("planes", ("xy",)), ("arcs", False), ("helices", False), ("max_sweep_rad", math.tau),
                 ("tool_changes", False), ("max_tool_number", 255), ("max_length_register", 1), ("tool_change_position_mode", "preserve_tip")),
          reference="camlib examples/grbl_post.py (GRBL 1.1h, laser mode $32=1, beam_s_max = $30)"),
-    # Lathes (camlib-only dialects): mapped once camlib takes turning tools from real outlines.
+    # Lathes: XZ arcs, diameter X words, T<station><offset>. Both posts' machines change tools "table" (each tool's
+    # place after its change is declared: the setup's start position, where the turret indexes) and write G18 only.
     Post("fanuc_lathe", "camlib_posts.fanuc_lathe_post", frozenset({"fanuc_lathe_system_a_v1"}), "FanucLathePost",
-         "FanucLatheDecoder", process="turning", reference="camlib examples/fanuc_lathe_post.py (docs/fanuc-lathe-post.md)"),
+         "FanucLatheDecoder", process="turning", fixed=(("tool_change_position_mode", "table"), ("planes", ("xz",))),
+         reference="camlib examples/fanuc_lathe_post.py (docs/fanuc-lathe-post.md)"),
     Post("centroid_lathe", "camlib_posts.centroid_lathe_post", frozenset({"centroid_lathe_v1"}), "CentroidLathePost",
-         "CentroidLatheDecoder", process="turning",
+         "CentroidLatheDecoder", process="turning", fixed=(("tool_change_position_mode", "table"), ("planes", ("xz",))),
          reference="camlib examples/centroid_lathe_post.py (docs/centroid-lathe-post.md)"),
 )}
 BEAM_PROCESSES = ("plasma", "laser")
@@ -1025,6 +1122,131 @@ def _decimals(resolution):
 LOWERED_LIMITS = ("max_feed_mm_min", "max_spindle_rpm", "rapid_mm_min")   # a program may lower these, never raise them
 
 
+def _choose_post(controller, post):
+    """The camlib post of a shop controller: the one its dialect has, or the one named (a dialect several posts serve)."""
+    c = _definition(controller, "controller")
+    dialect = c.get("dialect")
+    candidates = [p for p in POSTS.values() if dialect in p.dialects]
+    if post is not None:
+        chosen = POSTS.get(post)
+        if chosen is None or dialect not in chosen.dialects:
+            names = ", ".join(p.name for p in candidates) or "none"
+            raise ShopMappingError(f"Post {post!r} doesn't serve controller {controller.key} (dialect {dialect}); "
+                                   f"its posts: {names}.")
+    else:
+        implicit = [p for p in candidates if p.implicit]
+        if len(implicit) != 1:
+            names = ", ".join(p.name for p in candidates)
+            raise ShopMappingError(f"Controller {controller.key} (dialect {dialect}) has "
+                                   + (f"several camlib posts ({names}): name one with post=." if candidates else
+                                      "no camlib post. Posts: " + ", ".join(f"{p.name} ({', '.join(sorted(p.dialects))})"
+                                                                            for p in POSTS.values()) + "."))
+        chosen = implicit[0]
+    if chosen.process not in (c.get("processes") or ["milling"]):
+        raise ShopMappingError(f"Controller {controller.key} doesn't declare the {chosen.process} process its post "
+                               f"{chosen.name} is for: add it to the controller's processes.")
+    return chosen
+
+
+def _merge(item, chosen, derived, premises):
+    """The machine's values: what the shop gives (`derived`) with what the program states (`premises`). A value the post
+    sets itself is nobody's to pass; a program may lower the shop's limits, never raise or contradict them."""
+    derived = {k: v for k, v in derived.items() if v is not None}
+    for key, value in chosen.fixed:
+        if key in premises:
+            raise ShopMappingError(f"Post {chosen.name} sets {key} itself ({value!r}): leave it out of machine(...).")
+        if key in derived:
+            if derived[key] != value:
+                raise ShopMappingError(f"Machine {item.key}: the shop gives {key}={derived[key]!r}, but post {chosen.name}'s "
+                                       f"machine has {key}={value!r} ({chosen.reference}); change the shop.")
+            del derived[key]
+    for key, value in premises.items():
+        if key in derived:
+            if key in LOWERED_LIMITS and isinstance(value, (int, float)) and value <= derived[key]:
+                derived[key] = value
+                continue
+            if value != derived[key]:
+                raise ShopMappingError(f"{key}={value!r} disagrees with the shop ({derived[key]!r}); change the shop, "
+                                       + ("or give a lower value." if key in LOWERED_LIMITS else "not the program."))
+    return derived, {k: v for k, v in premises.items() if k not in derived}
+
+
+def _lathe_machine(item, setup, post, *, tooling, work_to_machine, fixtures, lowering, position_after_mm,
+                   diameter_register, premises):
+    """machine() for a lathe (its docstring): the shop's lathe as a camlib Machine for a lathe setup, with its post."""
+    import camlib
+    from camlib.motion import WorkFrame
+    from camlib.post import ToolSetting
+    d = _definition(item, "machine_instance")
+    model, controller = d.get("model"), d.get("controller")
+    m, c = _definition(model, "machine_model"), _definition(controller, "controller")
+    chosen = _choose_post(controller, post)
+    where = f"Machine {item.key} (post {chosen.name})"
+    if getattr(setup, "turning", None) is None:
+        raise ShopMappingError(f"{where} is a lathe: its setup is a lathe setup, Setup(stock=TurnStockSpec(...), "
+                               "tools=(station(shop.<turret>, tool), ...), operations=(Turn...), turning=TurningSetup(...)).")
+    if "turning" not in (m.get("processes") or []):
+        raise ShopMappingError(f"{where}: machine model {model.key} isn't a lathe (MachineModel.lathe).")
+    for name, value, why in (("tooling", tooling, "each tool's station and offset are the setup's (station(shop.<turret>, tool))"),
+                             ("fixtures", fixtures or None, "a lathe setup's workholding is its chuck face "
+                                                            "(TurningSetup(chuck_z_mm=...)), which every move is checked against"),
+                             ("diameter_register", diameter_register, "a turret offset holds the nose radius"),
+                             ("position_after_mm", position_after_mm, "a turret indexes at the setup's start position")):
+        if value is not None:
+            raise ShopMappingError(f"{where}: give no {name}= ({why}).")
+    nodes = {n.get("id"): n for n in m.get("nodes") or []}
+    rates = []
+    for axis in "XZ":
+        limits = (nodes.get(axis) or {}).get("limits") or {}
+        rate = limits.get("max_velocity_per_minute")
+        if nodes.get(axis, {}).get("kind") != "linear" or limits.get("unit") != "mm" or not isinstance(rate, (int, float)):
+            raise ShopMappingError(f"Machine model {model.key} has no linear {axis} axis in mm with its rate "
+                                   f"(nodes[{axis}].limits.max_velocity_per_minute).")
+        rates.append(float(rate))
+    spindles = [s for s in m.get("spindles") or [] if s.get("role") == "work"]
+    if len(spindles) != 1 or not isinstance(spindles[0].get("max_rpm"), (int, float)):
+        raise ShopMappingError(f"Machine model {model.key} needs its one work spindle with max_rpm.")
+    stations = len((m.get("tool_change") or {}).get("stations") or [])
+    derived = dict(output_units=c.get("output_units"), max_spindle_rpm=float(spindles[0]["max_rpm"]),
+                   max_feed_mm_min=min(rates), rapid_mm_min=min(rates), tool_changes=stations > 0,
+                   decimals=_decimals(c.get("linear_resolution_mm")))
+    if work_to_machine is not None:
+        if isinstance(work_to_machine, (list, tuple)):
+            work_to_machine = WorkFrame(tuple(work_to_machine))
+        if not isinstance(work_to_machine, WorkFrame):
+            raise ShopMappingError("work_to_machine is a camlib WorkFrame (camlib.motion) or (x, y, z).")
+        _frame(work_to_machine, "work_to_machine")
+        premises = {**premises, "work_to_machine": work_to_machine}
+    derived, premises = _merge(item, chosen, derived, premises)
+    # camlib's lathe run posts stand-in tool assemblies (id and gauge length for the program header); each one's T
+    # station and offset are its TurnToolSetting's, and its change leaves it at the setup's start (the turret pose).
+    header = camlib.Job("header", "1", (setup,)).compile().setup(setup.id).program_header()
+    numbers = {s.tool.id: s for s in setup.tools}
+    settings = []
+    for proxy in header.tools:
+        s = numbers[proxy.id]
+        if stations and not 1 <= s.number <= stations:
+            raise ShopMappingError(f"{where}: tool {proxy.id} is in station {s.number}; model {model.key}'s turret has "
+                                   f"{stations}.")
+        settings.append(ToolSetting.for_tool(proxy, number=s.number, length_register=s.offset,
+                                             position_after_mm=tuple(header.initial_position_mm)))
+    name = str(d.get("name") or item.key)[:128]
+    values = {**derived, **premises}
+    try:
+        built, post_class, decoder_class = build_machine(chosen.name, name, settings, values)
+    except TypeError as error:
+        raise ShopMappingError(f"{where}: {error}. The shop gives {', '.join(sorted(derived))}; give the rest to "
+                               f"machine(...) ({chosen.reference}).") from error
+    data = dict(key=item.key, controller=controller.key, post=chosen.name, name=name,
+                values={k: encode(v, f"machine({k}=...)") for k, v in values.items()},
+                tools=[dict(tool=t.tool, number=t.number, length_register=t.length_register,
+                            position_after_mm=list(t.position_after_mm), diameter_register=t.diameter_register)
+                       for t in settings],
+                lowering=encode(lowering, "lowering"), derived=sorted(derived), scene=dict(travel_mm=None, bodies=[]))
+    return Target(item.key, controller.key, chosen.name, built, post_class, decoder_class, lowering, derived, data,
+                  data["scene"])
+
+
 _REQUIRED = object()
 
 
@@ -1053,11 +1275,22 @@ def machine(item, setup, *, tooling=None, work_to_machine=_REQUIRED, fixtures=()
     no `tooling`: its one tool is the setup's head(...) and the T number and length register its ThermalCut operations
     give; the head's attachment carries the travel. `diameter_register` is the controller's D register holding the
     head's kerf wear, for ThermalCut(compensation="wear") (G41/G42): stated by the program, never assumed (a milling
-    machine's tools take theirs from the tool setup's radius_register). Lathes are refused until camlib takes turning
-    tools from real outlines."""
+    machine's tools take theirs from the tool setup's radius_register).
+
+    A lathe (a controller whose dialect has a camlib lathe post, a MachineModel.lathe) takes a lathe `setup`
+    (Setup(stock=TurnStockSpec(...), tools=(station(shop.turret, tool), ...), turning=TurningSetup(...))) and no
+    `tooling`: each tool's station and offset are the setup's own (station()). From the shop: the spindle's top speed,
+    the X and Z rates, the units and decimals. camlib checks a lathe setup's every move against its part, bore, chuck
+    face and stock; the machine's travel and bodies are checked only with a machine crash model (camlib
+    docs/machine.md), which the build's result lists as not checked."""
     from camlib.motion import WorkFrame
     from camlib.post import ToolSetting
 
+    if _choose_post(_definition(item, "machine_instance").get("controller"), post).process == "turning":
+        return _lathe_machine(item, setup, post, tooling=tooling,
+                              work_to_machine=None if work_to_machine is _REQUIRED else work_to_machine, fixtures=fixtures,
+                              lowering=lowering, position_after_mm=position_after_mm, diameter_register=diameter_register,
+                              premises=premises)
     if work_to_machine is _REQUIRED or work_to_machine is None:
         raise ShopMappingError(f"machine({getattr(item, 'key', item)!r}, ...) needs work_to_machine=: where the work "
                                "zero (the part's origin) sits in the machine's coordinates, i.e. the work offset's X Y Z "
@@ -1079,30 +1312,7 @@ def machine(item, setup, *, tooling=None, work_to_machine=_REQUIRED, fixtures=()
     model, controller = d.get("model"), d.get("controller")
     m = _definition(model, "machine_model")
     c = _definition(controller, "controller")
-    dialect = c.get("dialect")
-    candidates = [p for p in POSTS.values() if dialect in p.dialects]
-    if post is not None:
-        chosen = POSTS.get(post)
-        if chosen is None or dialect not in chosen.dialects:
-            names = ", ".join(p.name for p in candidates) or "none"
-            raise ShopMappingError(f"Post {post!r} doesn't serve controller {controller.key} (dialect {dialect}); "
-                                   f"its posts: {names}.")
-    else:
-        implicit = [p for p in candidates if p.implicit]
-        if len(implicit) != 1:
-            names = ", ".join(p.name for p in candidates)
-            raise ShopMappingError(f"Controller {controller.key} (dialect {dialect}) has "
-                                   + (f"several camlib posts ({names}): name one with post=." if candidates else
-                                      "no camlib post. Posts: " + ", ".join(f"{p.name} ({', '.join(sorted(p.dialects))})"
-                                                                            for p in POSTS.values()) + "."))
-        chosen = implicit[0]
-    if chosen.process == "turning":
-        raise ShopMappingError(f"Controller {controller.key} is a lathe control (post {chosen.name}): camlib programs "
-                               "can't map the shop's turning tools yet (camlib takes inserts and holders as a fixed "
-                               "shape; outline geometry is being added to camlib). Turning programs are refused until then.")
-    if chosen.process not in (c.get("processes") or ["milling"]):
-        raise ShopMappingError(f"Controller {controller.key} doesn't declare the {chosen.process} process its post "
-                               f"{chosen.name} is for: add it to the controller's processes.")
+    chosen = _choose_post(controller, post)
     beam = chosen.process in BEAM_PROCESSES
     head_entry = None
     if beam:
@@ -1155,7 +1365,6 @@ def machine(item, setup, *, tooling=None, work_to_machine=_REQUIRED, fixtures=()
         z = next((q.get("value") for q in (home or {}).get("positions") or [] if q.get("joint") == "Z"), None)
         if z is not None:
             derived["tool_change_home_z_mm"] = float(z)
-    derived = {k: v for k, v in derived.items() if v is not None}
     if chosen.name == "grbl_laser":
         # GRBL has no length offsets: its work offset holds the head's length (camlib examples/grbl_post.py). Both its
         # positions follow from the program's work_to_machine, the head's gauge length and the setup's start, exactly.
@@ -1168,23 +1377,7 @@ def machine(item, setup, *, tooling=None, work_to_machine=_REQUIRED, fixtures=()
         offset = (frame[0][0], frame[0][1], frame[0][2] + gauge)
         start = tuple(o + p for o, p in zip(offset, setup.initial_position_mm))
         derived.update(work_offset_machine_mm=offset, initial_machine_mm=start)
-    for key, value in chosen.fixed:
-        if key in premises:
-            raise ShopMappingError(f"Post {chosen.name} sets {key} itself ({value!r}): leave it out of machine(...).")
-        if key in derived:
-            if derived[key] != value:
-                raise ShopMappingError(f"Machine {item.key}: the shop gives {key}={derived[key]!r}, but post {chosen.name}'s "
-                                       f"machine has {key}={value!r} ({chosen.reference}); change the shop.")
-            del derived[key]
-    for key, value in premises.items():
-        if key in derived:
-            if key in LOWERED_LIMITS and isinstance(value, (int, float)) and value <= derived[key]:
-                derived[key] = value
-                continue
-            if value != derived[key]:
-                raise ShopMappingError(f"{key}={value!r} disagrees with the shop ({derived[key]!r}); change the shop, "
-                                       + ("or give a lower value." if key in LOWERED_LIMITS else "not the program."))
-    premises = {k: v for k, v in premises.items() if k not in derived}
+    derived, premises = _merge(item, chosen, derived, premises)
     offsets = c.get("work_offsets")
     if premises.get("work_offset") is not None and offsets and premises["work_offset"] not in offsets:
         raise ShopMappingError(f"Work offset {premises['work_offset']} isn't one controller {controller.key} offers "

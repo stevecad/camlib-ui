@@ -14,9 +14,9 @@ def projects(tmp_path):
 
 
 def test_seed_copies_the_examples(projects):
-    assert example_names() == ["cover", "plate"]
-    assert [p["name"] for p in projects.list()] == ["cover", "plate"]
-    for name in ("cover", "plate"):
+    assert example_names() == ["cover", "plate", "shaft"]
+    assert [p["name"] for p in projects.list()] == ["cover", "plate", "shaft"]
+    for name in ("cover", "plate", "shaft"):
         example = projects.describe(name)
         assert (example["part"], example["shop"], example["program"]) == ("part.py", "shop.py", "program.py")
 

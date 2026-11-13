@@ -1,6 +1,7 @@
 /**
  * The Manufacture ribbon under the top bar (from STEVE Studio's Ribbon.tsx and manufacture/commands.ts): Setup, the
- * shop, every camlib milling operation grouped 2D, Holes and 3D, then Generate, Simulate and Post. Each button is a
+ * shop, every camlib milling operation grouped 2D, Holes and 3D, its turning operations (a lathe setup's), then
+ * Generate, Simulate and Post. Each button is a
  * command (commands.ts): its label, why it's unavailable (on hover), what it does. Too narrow for every group, the
  * lowest priority groups fold into one button with a menu; narrower still, the ribbon scrolls sideways.
  */
@@ -14,7 +15,7 @@ import { PointMenu, type Entry } from './TreeRow';
 import styles from '../shell/Ribbon.module.css';
 
 /** The studio's ribbon priorities (ribbonPriority.ts): lower folds first. */
-const KEEP = 100, HIGH = 80, MID = 60;
+const KEEP = 100, HIGH = 80, MID = 60, LOW = 40;
 
 interface Group { title: string; priority: number; items: string[] }
 
@@ -22,6 +23,8 @@ const GROUPS: Group[] = [
   { title: 'Setup', priority: KEEP, items: ['cam.setup.milling'] },
   { title: 'Shop', priority: HIGH, items: ['cam.shop'] },
   ...(['2D', 'Holes', '3D'] as const).map((group): Group => ({ title: group, priority: MID, items: OP_SPECS.filter((spec) => spec.group === group).map((spec) => `cam.code.${spec.cls}`) })),
+  // A lathe setup's operations: the first group to fold into a menu when the ribbon runs out of room.
+  { title: 'Turning', priority: LOW, items: OP_SPECS.filter((spec) => spec.group === 'Turning').map((spec) => `cam.code.${spec.cls}`) },
   { title: 'Actions', priority: KEEP, items: ['cam.generate', 'cam.simulate', 'cam.post'] },
 ];
 

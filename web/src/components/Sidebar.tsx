@@ -195,7 +195,7 @@ function setupStatus(setupId: string): { s: string; label: string; title?: strin
 /** A setup as the browser shows it: from program.py's code (the forms edit it), else from the last build's description (read only). */
 interface SetupView { id: string; code: CamSetup | null; described: SetupDescription | null; ops: { id: string; cls: string | null; kind: string | null; op: CamOp | null; summary: OperationSummary | null }[] }
 
-const addLines = (setupId: string, group: '2D' | 'Holes' | '3D'): Entry[] => availableSpecs().filter((spec) => spec.group === group)
+const addLines = (setupId: string, group: '2D' | 'Holes' | '3D' | 'Turning'): Entry[] => availableSpecs().filter((spec) => spec.group === group)
   .map((spec) => ({ label: spec.label, icon: <OpIcon kind={spec.cls} size={15} />, title: spec.about, run: () => { select(`setup:${setupId}`); void openNewOp(spec.cls, setupId); } }));
 
 const downloadLines = (setupId: string): Line[] => {
@@ -229,6 +229,7 @@ function SetupRows({ view, locked }: { view: SetupView; locked: string | null })
   const playing = player.status === 'ready' && player.source?.header.id === view.id ? player.source : null;
   const play = () => void openPlayer(view.id);
   const stock = view.described?.stock;
+  const lathe = view.code?.turning ?? view.described?.process === 'turning';
   // The operations with a toolpath to show: the ones the build shown planned (the tree may be ahead of it).
   const built = useMemo(() => (playable ? [...stats.keys()] : []), [playable, stats]);
   const paths = usePaths((state) => state.setups[view.id]);
@@ -237,9 +238,12 @@ function SetupRows({ view, locked }: { view: SetupView; locked: string | null })
   const togglePaths = () => toggleSetupPaths(view.id, built);
   const lines = (): Line[] => [
     { label: 'Edit setup', icon: <Pencil {...I} />, reason: locked, run: () => void openSetup(view.id) },
-    { label: 'Add 2D operation', icon: <Plus {...I} />, id: 'add-2d', reason: locked, items: addLines(view.id, '2D') },
-    { label: 'Add hole operation', icon: <Plus {...I} />, id: 'add-holes', reason: locked, items: addLines(view.id, 'Holes') },
-    { label: 'Add 3D operation', icon: <Plus {...I} />, id: 'add-3d', reason: locked, items: addLines(view.id, '3D') },
+    // A lathe setup takes camlib's turning operations, any other its milling ones.
+    ...(lathe
+      ? [{ label: 'Add turning operation', icon: <Plus {...I} />, id: 'add-turning', reason: locked, items: addLines(view.id, 'Turning') }]
+      : [{ label: 'Add 2D operation', icon: <Plus {...I} />, id: 'add-2d', reason: locked, items: addLines(view.id, '2D') },
+        { label: 'Add hole operation', icon: <Plus {...I} />, id: 'add-holes', reason: locked, items: addLines(view.id, 'Holes') },
+        { label: 'Add 3D operation', icon: <Plus {...I} />, id: 'add-3d', reason: locked, items: addLines(view.id, '3D') }]),
     'sep',
     { label: 'Build', icon: <Hammer {...I} />, shortcut: displayShortcut('Mod+Enter'), reason: useApp.getState().busy ? 'A build is running.' : null, run: () => void startBuild('full') },
     { label: 'Simulate this setup', icon: <Play {...I} />, reason: playable ? null : 'Build the program first.', run: play },
@@ -258,7 +262,8 @@ function SetupRows({ view, locked }: { view: SetupView; locked: string | null })
       <TreeRow depth={1} icon={<SetupIcon size={14} />} label={view.id} item={handle} selected={selected === handle}
         meta={<span className={styles.status} data-status={status.s} title={status.title ?? status.label}>{status.label}</span>}
         title={[
-          stock ? `Stock ${stock.max_mm.map((v, i) => num(v - stock.min_mm[i])).join(' × ')} mm on a ${num(stock.cell_size_mm, 3)} mm check grid` : null,
+          stock?.kind === 'turned' ? `Bar ⌀ ${num(stock.outer_radius_mm * 2)} × ${num(stock.z_max_mm - stock.z_min_mm)} mm${stock.bore_radius_mm ? `, bored ⌀ ${num(stock.bore_radius_mm * 2)}` : ''}, checked in ${num(stock.cell_mm, 3)} mm bins along Z`
+            : stock ? `Stock ${stock.max_mm.map((v, i) => num(v - stock.min_mm[i])).join(' × ')} mm on a ${num(stock.cell_size_mm, 3)} mm check grid` : null,
           ...(view.described?.machines ?? []).map((machine) => `${machine.machine} · ${machine.post} post`),
           `${view.ops.length} operations. Double-click to edit it; right-click to add an operation.`,
         ].filter(Boolean).join('\n')}

@@ -9,6 +9,7 @@ import { api } from '../api';
 import { openPlayer, seekMove, useApp, usePaths, usePlayer, type PlayerSource } from '../state';
 import { MOVE_KINDS, moveAt, moveForLine, positionAtTime, timeAtPosition, tipAt } from '../cam/motion';
 import { findingMove, severityOf } from '../cam/playback';
+import { isTurned } from '../cam/stream';
 import { KIND_COLORS, SEVERITY_COLORS } from './Viewport';
 import { useEditor } from '../cam/programEditor';
 
@@ -136,6 +137,7 @@ function Deck({ source }: { source: PlayerSource }) {
   const toggle = () => usePlayer.setState((state) => ({ playing: !state.playing, position: !state.playing && state.position >= motion.count ? 0 : state.position }));
   const setShow = (patch: Partial<typeof show>) => usePlayer.setState({ show: { ...show, ...patch } });
   const cell = header.stock.cell_mm;
+  const turned = isTurned(header.stock);
   // Toolpaths hidden in the browser (a display choice: everything here still covers every operation).
   const paths = usePaths((state) => state.setups[header.id]);
   const pathHiddenHere = motion.count > 0 && !!paths?.hidden.includes(header.operations[source.owners[index]]?.id ?? '');
@@ -160,7 +162,9 @@ function Deck({ source }: { source: PlayerSource }) {
           <span>Move <b>{index + 1}</b> / {motion.count}</span>
           <span className="kind"><i style={{ background: KIND_COLORS[kind] }} />{kind}</span>
           {motion.line[index] > 0 && <span>Line <b>{motion.line[index]}</b></span>}
-          <span>X <b>{num(tip[0])}</b> Y <b>{num(tip[1])}</b> Z <b>{num(tip[2])}</b></span>
+          {turned
+            ? <span title="Lathe coordinates: X is the radius from the spindle axis (the posted X word is the diameter), Z runs along it">X <b>{num(tip[0])}</b> (⌀ {num(tip[0] * 2)}) Z <b>{num(tip[2])}</b></span>
+            : <span>X <b>{num(tip[0])}</b> Y <b>{num(tip[1])}</b> Z <b>{num(tip[2])}</b></span>}
           {motion.feed[index] > 0 && <span>F <b>{num(motion.feed[index], 0)}</b></span>}
           {motion.rpm[index] > 0 && <span>S <b>{num(motion.rpm[index], 0)}</b></span>}
         </span>
@@ -172,7 +176,12 @@ function Deck({ source }: { source: PlayerSource }) {
         <span className="legend" aria-label="Toolpath colours">
           {(['feed', 'plunge', 'lead', 'rapid', 'retract'] as const).map((item) => <span key={item} className="kind"><i style={{ background: KIND_COLORS[item] }} />{item === 'feed' ? 'cut' : item}</span>)}
         </span>
-        {show.grid || !stockStatus
+        {turned
+          ? <span className="stock-note" id="stock-note" data-stock="turned"
+              title={`camlib's own turned stock, the one every move was checked on: per ${num(cell[0])} mm bin along Z (${header.stock.nx} bins; the program's TurnStockSpec sets the size) the bounds of the bar's outer radius and of its bore's. Drawn revolved about the spindle axis with a quarter cut away, as the most material that may still be there. Shown as it is once the moves before the playing one are done: a move's cut appears at its end.`}>
+              Stock: <b>camlib’s turned stock</b> ({num(cell[0])} mm bins along Z){stockError ? ` · ${stockError}` : ''}
+            </span>
+          : show.grid || !stockStatus
           ? <span className="stock-note" id="stock-note" data-stock="grid"
               title={`camlib's own stock: the grid every check ran on, ${num(cell[0])} × ${num(cell[1])} mm cells (${header.stock.nx} × ${header.stock.ny}; the program's StockSpec sets the size). Shown as it is once the moves before the playing one are done: a move's cut appears at its end. Each cell shows the most material that may still be there.`}>
               Stock: <b>camlib’s check grid</b> ({num(cell[0])} mm cells){stockError ? ` · ${stockError}` : ''}
@@ -189,8 +198,8 @@ function Deck({ source }: { source: PlayerSource }) {
               <button key={mode} type="button" data-on={show.stock === mode || undefined} onClick={() => setShow({ stock: mode })}>{mode === 'solid' ? 'Stock' : mode === 'translucent' ? 'Clear' : 'Off'}</button>
             ))}
           </span>
-          <button type="button" className="toggle" id="stock-grid" data-on={show.grid || undefined} title="Show camlib's own stock: the grid every check ran on, instead of the fine display stock"
-            onClick={() => setShow({ grid: !show.grid })}>camlib grid</button>
+          {!turned && <button type="button" className="toggle" id="stock-grid" data-on={show.grid || undefined} title="Show camlib's own stock: the grid every check ran on, instead of the fine display stock"
+            onClick={() => setShow({ grid: !show.grid })}>camlib grid</button>}
           <button type="button" className="toggle" data-on={show.tool || undefined} onClick={() => setShow({ tool: !show.tool })}>Tool</button>
           <button type="button" className="toggle" data-on={show.part || undefined} onClick={() => setShow({ part: !show.part })}>Part</button>
           <button type="button" className="toggle" data-on={show.fixtures || undefined} onClick={() => setShow({ fixtures: !show.fixtures })}>Fixtures</button>
