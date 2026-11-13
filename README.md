@@ -18,6 +18,8 @@ plasma cutting program in Python, build it, see what camlib planned, checked and
 - **Projects on disk**: a folder per project with its part (STEP or a CadQuery script), its shop (machines, tools,
   fixtures as Python) and its program (camlib itself, plus a few helpers). See [docs/programs.md](docs/programs.md).
 - **Toolpaths without writing code**: the browser's Setups list the program's setups and operations as its code says.
+  The ribbon shows the operations of the setup being worked on: a mill's (2D, Holes, 3D) or a lathe's (Turning,
+  Grooving, Holes, Threading).
   Right-click a setup to add any of camlib's 25 milling operations (face, pocket, contour, drill, bore, tap, parallel,
   waterline, …) through a form; double-click one to edit it; drag, Delete, F2 and Ctrl+D reorder, delete, edit and
   duplicate. Faces, hole walls and edges are picked on the part. Every field is camlib's own (from the installed

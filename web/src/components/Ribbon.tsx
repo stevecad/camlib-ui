@@ -1,13 +1,15 @@
 /**
  * The Manufacture ribbon under the top bar (from STEVE Studio's Ribbon.tsx and manufacture/commands.ts): Setup, the
- * shop, every camlib milling operation grouped 2D, Holes and 3D, its turning operations (a lathe setup's), then
- * Generate, Simulate and Post. Each button is a
+ * shop, the operations of the setup being worked on, then Generate, Simulate and Post. The operations follow the
+ * setup (`setupKind`): a mill's are camlib's milling operations grouped 2D, Holes and 3D; a lathe's its turning
+ * operations grouped Turning, Grooving, Holes and Threading; a sheet's (plasma, laser) none yet, its cuts being written
+ * in code. Each button is a
  * command (commands.ts): its label, why it's unavailable (on hover), what it does. Too narrow for every group, the
  * lowest priority groups fold into one button with a menu; narrower still, the ribbon scrolls sideways.
  */
-import { useCallback, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type WheelEvent } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { availability, command, displayShortcut } from '../commands';
+import { availability, command, displayShortcut, setupKind } from '../commands';
 import { useApp } from '../state';
 import { useEditor, useProgram } from '../cam/programEditor';
 import { OP_SPECS } from '../cam/opSpecs';
@@ -19,14 +21,29 @@ const KEEP = 100, HIGH = 80, MID = 60, LOW = 40;
 
 interface Group { title: string; priority: number; items: string[] }
 
-const GROUPS: Group[] = [
-  { title: 'Setup', priority: KEEP, items: ['cam.setup.milling'] },
-  { title: 'Shop', priority: HIGH, items: ['cam.shop'] },
-  ...(['2D', 'Holes', '3D'] as const).map((group): Group => ({ title: group, priority: MID, items: OP_SPECS.filter((spec) => spec.group === group).map((spec) => `cam.code.${spec.cls}`) })),
-  // A lathe setup's operations: the first group to fold into a menu when the ribbon runs out of room.
-  { title: 'Turning', priority: LOW, items: OP_SPECS.filter((spec) => spec.group === 'Turning').map((spec) => `cam.code.${spec.cls}`) },
-  { title: 'Actions', priority: KEEP, items: ['cam.generate', 'cam.simulate', 'cam.post'] },
-];
+const ops = (classes: string[]) => classes.filter((cls) => OP_SPECS.some((spec) => spec.cls === cls)).map((cls) => `cam.code.${cls}`);
+const ACTIONS: Group = { title: 'Actions', priority: KEEP, items: ['cam.generate', 'cam.simulate', 'cam.post'] };
+const START: Group[] = [{ title: 'Setup', priority: KEEP, items: ['cam.setup.milling'] }, { title: 'Shop', priority: HIGH, items: ['cam.shop'] }];
+
+/** The ribbon's groups for what the setup machines. */
+export function groupsFor(kind: 'mill' | 'lathe' | 'sheet'): Group[] {
+  if (kind === 'lathe') {
+    return [
+      ...START,
+      { title: 'Turning', priority: MID, items: ops(['TurnFace', 'TurnRough', 'TurnFinish']) },
+      { title: 'Grooving', priority: MID, items: ops(['TurnGroove', 'TurnPartOff', 'TurnFaceGroove']) },
+      { title: 'Holes', priority: MID, items: ops(['TurnDrill', 'TurnBoreRough', 'TurnBoreFinish']) },
+      { title: 'Threading', priority: LOW, items: ops(['TurnThread']) },
+      ACTIONS,
+    ];
+  }
+  if (kind === 'sheet') return [...START, ACTIONS];
+  return [
+    ...START,
+    ...(['2D', 'Holes', '3D'] as const).map((group): Group => ({ title: group, priority: MID, items: OP_SPECS.filter((spec) => spec.group === group).map((spec) => `cam.code.${spec.cls}`) })),
+    ACTIONS,
+  ];
+}
 
 /** Re-render when what commands read changes (the project, its build, the program, an open form). */
 function useCommandEpoch() {
@@ -120,6 +137,8 @@ const HYSTERESIS = 32;
 
 export default function Ribbon() {
   useCommandEpoch();
+  const kind = setupKind();
+  const GROUPS = useMemo(() => groupsFor(kind), [kind]);
   const ribbon = useRef<HTMLDivElement>(null);
   const measure = useRef<HTMLDivElement>(null);
   const [folded, setFolded] = useState<string[]>([]);
@@ -149,7 +168,7 @@ export default function Ribbon() {
       const next = order.filter((index) => fold.has(index)).map((index) => GROUPS[index].title);
       return next.join('\n') === previous.join('\n') ? previous : next;
     });
-  }, []);
+  }, [GROUPS]);
   useLayoutEffect(() => {
     fit();
     const observer = new ResizeObserver(() => fit());
@@ -181,7 +200,7 @@ export default function Ribbon() {
     bar.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? bar.clientWidth : 1);
   };
   return (
-    <div ref={ribbon} className={styles.ribbon} role="toolbar" aria-label="Manufacture" id="ribbon" data-more={more || undefined} data-folded={folded.join(',') || undefined} onWheel={wheel}>
+    <div ref={ribbon} className={styles.ribbon} role="toolbar" aria-label="Manufacture" id="ribbon" data-kind={kind} data-more={more || undefined} data-folded={folded.join(',') || undefined} onWheel={wheel}>
       <div className={styles.groups}>
         {GROUPS.map((group) => <RibbonGroup key={group.title} group={group} collapsed={folded.includes(group.title)} />)}
       </div>

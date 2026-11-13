@@ -54,6 +54,24 @@ function downloadGcode() {
   a.download = `${build.metadata?.program.id ?? 'program'}-${setup}-${machine.machine}.nc`;
   a.click();
 }
+/** The setup a new operation would go into: the one selected, or the selected operation's, else the last (null: none). */
+export function targetSetup() {
+  const setups = useProgram.getState().model?.setups ?? [];
+  const selected = app().selected;
+  const id = selected?.startsWith('setup:') ? selected.slice(6) : selected?.startsWith('operation:') ? selected.slice(10).split('/')[0] : null;
+  return setups.find((setup) => setup.id === id) ?? setups.at(-1) ?? null;
+}
+/**
+ * What that setup machines, for the ribbon: a lathe's bar, a sheet on a plasma or laser table (its operations are
+ * camlib's thermal ones), or a milled part (also when there is no setup yet).
+ */
+export function setupKind(): 'mill' | 'lathe' | 'sheet' {
+  const setup = targetSetup();
+  if (!setup) return 'mill';
+  if (setup.turning) return 'lathe';
+  const classes = setup.operations.map((op) => op.cls).filter(Boolean);
+  return classes.length > 0 && classes.every((cls) => cls!.startsWith('Thermal')) ? 'sheet' : 'mill';
+}
 const needsProgramFile = () => (app().project ? true : 'Open or create a project first.');
 /** An operation's form: camlib has it, and the program has a setup to put it in. */
 const opReason = (cls: string, turning: boolean) => () => {
@@ -61,10 +79,8 @@ const opReason = (cls: string, turning: boolean) => () => {
   if (fieldsLoaded() && !availableSpecs().some((spec) => spec.cls === cls)) return 'The installed camlib doesn’t have this operation.';
   const setups = useProgram.getState().model?.setups ?? [];
   if (!setups.length) return useProgram.getState().problem ?? 'Add a setup first (Setup).';
-  // The setup it would go into (the one selected, or the selected operation's, else the last): a lathe's or a mill's.
-  const selected = app().selected;
-  const id = selected?.startsWith('setup:') ? selected.slice(6) : selected?.startsWith('operation:') ? selected.slice(10).split('/')[0] : null;
-  const target = setups.find((setup) => setup.id === id) ?? setups.at(-1)!;
+  // The setup it would go into: a lathe's or a mill's.
+  const target = targetSetup()!;
   if (target.turning !== turning) return target.turning ? `${target.id} is a lathe setup: it takes turning operations.` : `${target.id} isn’t a lathe setup: turning operations go into one (written in code: docs/programs.md, Lathes).`;
   return true;
 };

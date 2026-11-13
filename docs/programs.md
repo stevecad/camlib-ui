@@ -266,7 +266,8 @@ player's Spin toggle): slowed down to be seen, three lines along the bar and the
 picture, not a model of yours, and nothing is checked against it. Before a build the bar is shown with the part's half-section and the chuck face (dashed).
 
 The tree lists a lathe setup and its operations from the code, and the forms edit its operations as they do a mill's:
-right-click the setup → **Add turning operation** (or the ribbon's Turning group), double-click an operation to edit
+right-click the setup → **Add turning operation**, or use the ribbon (with a lathe setup selected it shows the turning
+operations, grouped Turning, Grooving, Holes and Threading, in place of the milling ones), double-click an operation to edit
 it, drag, duplicate and delete. Every field is camlib's own, and the ones camlib requires (the feed per revolution and
 the speed among them) are required in the form. A turning operation takes no geometry: the part's half-section is the
 setup's. Its tool is chosen from the setup's turret (the tools whose insert fits the operation: a blade for a groove, a
