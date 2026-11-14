@@ -14,13 +14,15 @@ def projects(tmp_path):
 
 
 def test_seed_copies_the_examples(projects):
-    assert example_names() == ["bushing", "cover", "plate", "shaft", "sheet"]
-    assert [p["name"] for p in projects.list()] == ["bushing", "cover", "plate", "shaft", "sheet"]
+    assert example_names() == ["bushing", "cover", "nest", "plate", "shaft", "sheet"]
+    assert [p["name"] for p in projects.list()] == ["bushing", "cover", "nest", "plate", "shaft", "sheet"]
     for name in ("bushing", "cover", "plate", "shaft"):
         example = projects.describe(name)
         assert (example["part"], example["shop"], example["program"]) == ("part.py", "shop.py", "program.py")
     sheet = projects.describe("sheet")   # flat parts written in the program: no part file
     assert (sheet["part"], sheet["shop"], sheet["program"]) == (None, "shop.py", "program.py")
+    nest = projects.describe("nest")   # parts from a DXF file: no part file either
+    assert (nest["part"], nest["shop"], nest["program"]) == (None, "shop.py", "program.py")
 
 
 def test_seed_leaves_a_root_with_projects_alone(tmp_path):
