@@ -126,6 +126,9 @@ export const NESTED: Record<string, NestedChoice> = {
   part_order: { classes: ['SpreadHeat'], label: () => 'Spread the heat', none: 'Nearest part next' },
   avoid_cut_parts: { classes: ['AvoidCutParts'], label: () => 'Go round them', none: 'Off' },
   crop: { classes: ['CropCut'], label: () => 'Cut the offcut free', none: 'Off' },
+  lead_placement: { classes: ['LeadPlacement'], label: () => 'By these rules', none: 'Where each loop starts' },
+  corner_loops: { classes: ['CornerLoops'], label: () => 'Loop into the scrap', none: 'Off' },
+  corner_slowdown: { classes: ['CornerSlowdown'], label: () => 'Slow down', none: 'Off' },
 };
 
 /**
@@ -233,9 +236,11 @@ export const HIDDEN = new Set(['id', 'tool', 'tool_number', 'length_register', '
 /** A sheet operation's parts are chosen with its head, above the sections. */
 export const THERMAL_HIDDEN = new Set([...HIDDEN, 'parts']);
 
-export type Kind = 'number' | 'integer' | 'bool' | 'choice' | 'text' | 'point' | 'points' | 'lines' | 'geometry' | 'nested';
+export type Kind = 'number' | 'integer' | 'bool' | 'choice' | 'text' | 'source' | 'point' | 'points' | 'lines' | 'geometry' | 'nested';
 /** Fields holding a list of (x, y) points. */
 const POINT_LISTS = new Set(['positions_mm', 'points_mm']);
+/** Fields holding what the program names (Python source, written as typed): a nest's placed paths. */
+const SOURCES = new Set(['keep_off']);
 
 export interface FieldInfo extends FieldView {
   key: string;
@@ -264,6 +269,7 @@ const kindOf = (name: string, type: string, geometry: GeometryKind | undefined):
   if (geometry) return 'geometry';
   if (NESTED[name]) return 'nested';
   if (POINT_LISTS.has(name)) return 'points';
+  if (SOURCES.has(name)) return 'source';
   if (type.startsWith('float')) return 'number';
   if (type.startsWith('int')) return 'integer';
   if (type.startsWith('bool')) return 'bool';
@@ -294,6 +300,15 @@ const THERMAL_VIEW: Record<string, FieldView> = {
   avoid_cut_parts: v('Parts already cut', 'options', undefined, 'Cut parts can tip up between the slats: rapids go round them, or the cut is refused.'),
   crop: v('Crop cut', 'options', undefined, 'A last straight or L-shaped cut that frees the usable offcut from the skeleton. It is proven clear of every part.'),
   points_mm: v('Along', 'options', MM, 'Two points for a straight cut, three for an L, on the sheet: (x, y), (x, y). The torch pierces at the first; put the ends on the sheet’s edge or past it.'),
+  lead_placement: v('Leads', 'passes', undefined, 'Where a loop starts, and so where its lead meets the cut (it leaves a small mark there).'),
+  keep_off: v('Edges kept free of leads', 'options', undefined, 'The program’s name for the paths along those edges: a nest’s no_lead (declared on its parts), e.g. nest.no_lead.'),
+  keep_off_distance_mm: v('Stay this far from them', 'options', MM, 'Along the outline.'),
+  prefer: v('Start loops', 'options', undefined, 'A side of the part, (dx, dy), is written in the code.', [['as_drawn', 'Where they are drawn to start'], ['corner', 'At a corner']]),
+  corner_loops: v('Outside corners', 'passes', undefined, 'The cut runs on past the corner, turns round in the scrap and comes back, so both edges are cut straight through it. The nest must be planned for the same cut: the loops need room.'),
+  overshoot_mm: v('Run on past the corner', 'options', MM),
+  min_angle_deg: v('Corners turning at least', 'options', DEG, 'A square corner turns 90°.'), max_angle_deg: v('And at most', 'options', DEG),
+  corner_slowdown: v('Feed round corners', 'passes', undefined, 'A slower feed either side of each corner, so the arc catches up with the torch. Corners with a loop need none.'),
+  distance_mm: v('Before and after the corner', 'options', MM),
   min_distance_mm: v('Next part at least', 'passes', MM, 'From where the last part started, so two parts cut one after the other aren’t neighbours.'),
   clearance_mm: v('Clearance', 'options', MM, 'From the beam’s centre: include the torch body’s radius.'),
   compensation: v('Kerf compensation', 'options', undefined, 'Wear: posted with G41/G42, so the kerf is trimmed at the controller.', [['computer', 'In the program'], ['wear', 'Wear (G41/G42)']]),
@@ -310,7 +325,7 @@ const THERMAL_VIEW: Record<string, FieldView> = {
   edge_clearance_mm: v('Clearance to edges', 'options', MM, 'Material kept between a mark and its part’s edges.'),
   allow_off_part: v('Allow marks off the parts', 'options', undefined, 'Skips the proof that every mark is inside one part (marks on the scrap); the result says so.'),
 };
-const THERMAL_OPTIONS = new Set(['SmallHoles', 'MicroJoints', 'CommonLine', 'SpreadHeat', 'AvoidCutParts', 'CropCut']);
+const THERMAL_OPTIONS = new Set(['SmallHoles', 'MicroJoints', 'CommonLine', 'SpreadHeat', 'AvoidCutParts', 'CropCut', 'LeadPlacement', 'CornerLoops', 'CornerSlowdown']);
 
 /** How a turning operation shows fields whose names milling uses for something else. */
 const TURNING_VIEW: Record<string, FieldView> = {

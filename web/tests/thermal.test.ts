@@ -66,6 +66,18 @@ test('the sheet program’s cut read, edited and written back', { skip: !input &
   assert.match(cropped, /from camlib import .*CropCut/);
   if (out) writeFileSync(join(out, 'cropped.py'), cropped);
 
+  // Corner loops, a slower feed round the other corners, and leads sent to a corner: camlib's options, written as typed.
+  const corner_loops = { ...emptyNested('CornerLoops'), values: { overshoot_mm: '2', min_angle_deg: '45', max_angle_deg: '135' } };
+  const corner_slowdown = { ...emptyNested('CornerSlowdown'), values: { distance_mm: '4', feed_percent: '50', min_angle_deg: '60' } };
+  const lead_placement = { ...emptyNested('LeadPlacement'), values: { keep_off_distance_mm: '0', prefer: '"corner"' } };
+  const cornered = writeOp(code, model, 'sheet', { ...draft!, nested: { ...draft!.nested, corner_loops, corner_slowdown, lead_placement } }, cut);
+  const flat = cornered.replace(/\s+/g, ' ');
+  assert.ok(flat.includes('corner_loops=CornerLoops(overshoot_mm=2, min_angle_deg=45, max_angle_deg=135)'), cornered);
+  assert.ok(flat.includes('corner_slowdown=CornerSlowdown(distance_mm=4, feed_percent=50, min_angle_deg=60)'), cornered);
+  assert.ok(flat.includes('lead_placement=LeadPlacement(keep_off_distance_mm=0, prefer="corner")'), cornered);
+  assert.match(cornered, /from camlib import [^)]*CornerLoops/);
+  if (out) writeFileSync(join(out, 'cornered.py'), cornered);
+
   // A mark before the cut, on the sheet's margin (off the parts: said so). Lines that aren't points are refused by OK.
   const mark = newOp('ThermalMark', 'mark');
   assert.deepEqual(missingOf(mark), ['Head', 'Parts', 'Lines', 'Feed', 'Mark height', 'Power', 'Mark width']);
