@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fieldsOf, setFields, type CamlibField } from '../src/cam/opSpecs.ts';
 import { readProgram, type Outline } from '../src/cam/pyCode.ts';
-import { emptyNested, invalidOf, linesSource, linesText, missingOf, newOp, readOp, setupKindOf, writeOp, BAD_LINES } from '../src/cam/forms.ts';
+import { emptyNested, invalidOf, linesSource, linesText, missingOf, newOp, pointsSource, readOp, setupKindOf, writeOp, BAD_LINES } from '../src/cam/forms.ts';
 
 const input = process.env.CAMLIB_UI_THERMAL;
 const out = process.env.CAMLIB_UI_FORMS_OUT;
@@ -58,6 +58,13 @@ test('the sheet program’s cut read, edited and written back', { skip: !input &
   assert.match(edited, /from camlib import .*MicroJoints/);
   assert.equal(edited.slice(0, 200), code.slice(0, 200));
   if (out) writeFileSync(join(out, 'joints.py'), edited);
+
+  // A crop cut: the offcut is cut free last, along the points typed.
+  const crop = { ...emptyNested('CropCut'), values: { points_mm: pointsSource('(400, 0), (400, 300)')! } };
+  const cropped = writeOp(code, model, 'sheet', { ...draft!, nested: { ...draft!.nested, crop } }, cut);
+  assert.ok(cropped.replace(/\s+/g, ' ').includes('crop=CropCut(points_mm=((400, 0), (400, 300),))'), cropped);
+  assert.match(cropped, /from camlib import .*CropCut/);
+  if (out) writeFileSync(join(out, 'cropped.py'), cropped);
 
   // A mark before the cut, on the sheet's margin (off the parts: said so). Lines that aren't points are refused by OK.
   const mark = newOp('ThermalMark', 'mark');

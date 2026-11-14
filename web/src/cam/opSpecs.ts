@@ -125,6 +125,7 @@ export const NESTED: Record<string, NestedChoice> = {
   common_line: { classes: ['CommonLine'], label: () => 'Share one cut', none: 'Off' },
   part_order: { classes: ['SpreadHeat'], label: () => 'Spread the heat', none: 'Nearest part next' },
   avoid_cut_parts: { classes: ['AvoidCutParts'], label: () => 'Go round them', none: 'Off' },
+  crop: { classes: ['CropCut'], label: () => 'Cut the offcut free', none: 'Off' },
 };
 
 /**
@@ -234,7 +235,7 @@ export const THERMAL_HIDDEN = new Set([...HIDDEN, 'parts']);
 
 export type Kind = 'number' | 'integer' | 'bool' | 'choice' | 'text' | 'point' | 'points' | 'lines' | 'geometry' | 'nested';
 /** Fields holding a list of (x, y) points. */
-const POINT_LISTS = new Set(['positions_mm']);
+const POINT_LISTS = new Set(['positions_mm', 'points_mm']);
 
 export interface FieldInfo extends FieldView {
   key: string;
@@ -291,6 +292,8 @@ const THERMAL_VIEW: Record<string, FieldView> = {
   small_holes: v('Small holes', 'options'), micro_joints: v('Micro-joints', 'options'), common_line: v('Common lines', 'options'),
   part_order: v('Cut order', 'passes', undefined, 'Which part is cut next. Holes always come before their outline.'),
   avoid_cut_parts: v('Parts already cut', 'options', undefined, 'Cut parts can tip up between the slats: rapids go round them, or the cut is refused.'),
+  crop: v('Crop cut', 'options', undefined, 'A last straight or L-shaped cut that frees the usable offcut from the skeleton. It is proven clear of every part.'),
+  points_mm: v('Along', 'options', MM, 'Two points for a straight cut, three for an L, on the sheet: (x, y), (x, y). The torch pierces at the first; put the ends on the sheet’s edge or past it.'),
   min_distance_mm: v('Next part at least', 'passes', MM, 'From where the last part started, so two parts cut one after the other aren’t neighbours.'),
   clearance_mm: v('Clearance', 'options', MM, 'From the beam’s centre: include the torch body’s radius.'),
   compensation: v('Kerf compensation', 'options', undefined, 'Wear: posted with G41/G42, so the kerf is trimmed at the controller.', [['computer', 'In the program'], ['wear', 'Wear (G41/G42)']]),
@@ -307,7 +310,7 @@ const THERMAL_VIEW: Record<string, FieldView> = {
   edge_clearance_mm: v('Clearance to edges', 'options', MM, 'Material kept between a mark and its part’s edges.'),
   allow_off_part: v('Allow marks off the parts', 'options', undefined, 'Skips the proof that every mark is inside one part (marks on the scrap); the result says so.'),
 };
-const THERMAL_OPTIONS = new Set(['SmallHoles', 'MicroJoints', 'CommonLine', 'SpreadHeat', 'AvoidCutParts']);
+const THERMAL_OPTIONS = new Set(['SmallHoles', 'MicroJoints', 'CommonLine', 'SpreadHeat', 'AvoidCutParts', 'CropCut']);
 
 /** How a turning operation shows fields whose names milling uses for something else. */
 const TURNING_VIEW: Record<string, FieldView> = {

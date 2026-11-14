@@ -37,6 +37,11 @@ test('an adaptive clearing’s proof is said as camlib reported it', () => {
   ]);
   // Nothing is claimed that the report doesn't say.
   assert.deepEqual(reportHeadlines({ strategy: 'contour', loops: 1 }), []);
+  assert.deepEqual(reportHeadlines({ strategy: 'thermal_cut', pierces: 12, cut_length_mm: 2400, rapid_length_mm: 900, feed_seconds: 54, dwell_seconds: 6, crop_length_mm: 300 }).map((line) => line.text), [
+    '12 pierces, 2400 mm of cut, 900 mm of travel between cuts',
+    'About 1 min cutting at the programmed feeds (6 s of it pierce delays); travel and the controller’s own height moves come on top',
+    'Crop cut last: 300 mm',
+  ]);
   assert.deepEqual(reportHeadlines(null), []);
   assert.deepEqual(reportHeadlines({ shadow_error_mm: 0.004, diagnostics: ['loop 2 of the region has no tab position: it is cut free'] }).map((line) => [line.text, line.tone]), [
     ['Shadow error at most 0.004 mm (the cutter’s flat against the levels cut)', undefined], ['loop 2 of the region has no tab position: it is cut free', 'warn'],

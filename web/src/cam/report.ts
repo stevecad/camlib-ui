@@ -109,6 +109,15 @@ export function reportHeadlines(report: unknown): { text: string; tone?: 'warn' 
   const walls = sum('wall_passes');
   if (walls !== null) out.push({ text: `${figure(walls)} wall ${walls === 1 ? 'pass' : 'passes'}${layers !== null ? ` over ${layers} ${layers === 1 ? 'level' : 'levels'}` : ''}` });
   if (typeof top.shadow_error_mm === 'number') out.push({ text: `Shadow error at most ${figure(top.shadow_error_mm)} mm (the cutter’s flat against the levels cut)` });
+  // A plasma or laser cut: what the sheet takes, as camlib counted it (times at the programmed feeds, without acceleration or rapids).
+  if (top.strategy === 'thermal_cut' && typeof top.pierces === 'number' && typeof top.cut_length_mm === 'number') {
+    out.push({ text: `${figure(top.pierces)} ${top.pierces === 1 ? 'pierce' : 'pierces'}, ${figure(top.cut_length_mm)} mm of cut`
+      + `${typeof top.rapid_length_mm === 'number' ? `, ${figure(top.rapid_length_mm)} mm of travel between cuts` : ''}` });
+    if (typeof top.feed_seconds === 'number' && typeof top.dwell_seconds === 'number') {
+      out.push({ text: `About ${figure((top.feed_seconds + top.dwell_seconds) / 60)} min cutting at the programmed feeds${top.dwell_seconds ? ` (${figure(top.dwell_seconds)} s of it pierce delays)` : ''}; travel and the controller’s own height moves come on top` });
+    }
+    if (typeof top.crop_length_mm === 'number') out.push({ text: `Crop cut last: ${figure(top.crop_length_mm)} mm` });
+  }
   // camlib's diagnostics, each once (every level of a clearing repeats its own).
   const diagnostics = [...new Set(collect(report, 'diagnostics').flatMap((item) => (Array.isArray(item) ? item : [item])).filter((item): item is string => typeof item === 'string' && !!item))];
   for (const message of diagnostics.slice(0, 12)) out.push({ text: message, tone: 'warn' });

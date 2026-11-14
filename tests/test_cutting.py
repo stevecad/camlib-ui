@@ -147,7 +147,7 @@ def test_the_shops_table_and_recipe_map_to_camlibs_torch():
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node isn't installed")
 def test_the_cutting_forms_read_write_and_build(client, tmp_path):
     """web/tests/thermal.test.ts on the sheet example: the cut reads into its form through its `**plan` and the shop's
-    recipe; with micro-joints added, and with a mark added before it, camlib builds and releases what the forms wrote."""
+    recipe; with micro-joints added, with a crop cut added, and with a mark added before it, camlib builds and releases what the forms wrote."""
     root = Path(__file__).resolve().parent.parent
     code = (root / "camlib_ui" / "examples" / "sheet" / "program.py").read_text()
     (tmp_path / "input.json").write_text(json.dumps({"code": code, "outline": forms.outline(code), "fields": forms.operation_fields()}))
@@ -157,7 +157,7 @@ def test_the_cutting_forms_read_write_and_build(client, tmp_path):
                          env={**os.environ, "CAMLIB_UI_THERMAL": str(tmp_path / "input.json"), "CAMLIB_UI_FORMS_OUT": str(out)})
     assert run.returncode == 0, run.stdout[-4000:] + run.stderr[-4000:]
     assert "✔ the sheet program’s cut read, edited and written back" in run.stdout
-    for name in ("joints", "marked"):
+    for name in ("joints", "cropped", "marked"):
         text = (out / f"{name}.py").read_text()
         if name == "marked":
             # How this machine marks is its own (QtPlasmaC: two entries of its material file); the program states it.
@@ -171,6 +171,8 @@ def test_the_cutting_forms_read_write_and_build(client, tmp_path):
         operations = built["metadata"]["setups"][0]["operations"]
         if name == "joints":
             assert operations[0]["report"]["micro_joints"] > 0
+        elif name == "cropped":
+            assert operations[0]["report"]["crop_length_mm"] == 300
         else:
             assert [op["id"] for op in operations] == ["mark", "cut"]
 
