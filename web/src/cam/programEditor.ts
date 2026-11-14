@@ -331,7 +331,9 @@ export function partsChoices(model: CamProgramModel): { value: string; label: st
   const out: { value: string; label: string }[] = [];
   for (const [name, bound] of Object.entries(model.outline.bindings)) {
     const value = bound.value;
-    if (value.k === 'call' && base(value.f) === 'PlanarRegion') out.push({ value: name, label: `${name} (a region of the program)` });
+    // A region the program nests on (a Nest's sheet) is the sheet, not parts to cut out of it.
+    const sheets = Object.values(model.outline.bindings).map((item) => item.value).filter((item) => item.k === 'call' && base(item.f) === 'for_cut').map((item) => item.a?.[1]?.src);
+    if (value.k === 'call' && base(value.f) === 'PlanarRegion' && !sheets.includes(name)) out.push({ value: name, label: `${name} (a region of the program)` });
     else if (/^Nest\b[\s\S]*\.run\(\)\s*$/.test(value.src)) out.unshift({ value: `${name}.region`, label: `${name}.region (the nested parts)` });
   }
   return out;

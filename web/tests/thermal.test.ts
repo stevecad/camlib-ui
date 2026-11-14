@@ -75,6 +75,11 @@ test('the sheet program’s cut read, edited and written back', { skip: !input &
   assert.ok(marked.indexOf('ThermalMark("mark"') < marked.indexOf('ThermalCut("cut", torch, nest.region'));
   if (out) writeFileSync(join(out, 'marked.py'), marked);
 
+  // An option switched off in the form is left out of the code (camlib's default), never written as None.
+  const off = writeOp(code, model, 'sheet', { ...draft!, nested: { ...draft!.nested, part_order: emptyNested(null), avoid_cut_parts: emptyNested(null), small_holes: emptyNested(null) } }, cut);
+  assert.ok(!/=None/.test(off.slice(off.indexOf('ops = ('))), off);
+  assert.ok(!off.slice(off.indexOf('ops = (')).includes('small_holes'));
+
   // A milling operation doesn't go into a sheet setup.
   assert.throws(() => writeOp(code, model, 'sheet', { ...newOp('Facing', 'face'), tool: 't_em10' }), /milling operation: sheet is a plasma or laser setup/);
 });

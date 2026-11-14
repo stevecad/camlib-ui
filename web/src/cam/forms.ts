@@ -356,7 +356,8 @@ export function emitOp(draft: OpDraft, ctx: { toolVar: string; tooling: string; 
     const parts = [pyString(draft.id.trim()), draft.tool ?? '', (draft.values.parts ?? '').trim()];
     for (const field of fieldsOf(draft.cls)) {
       if (THERMAL_HIDDEN.has(field.key) || (draft.cls === 'ThermalCut' && CUTTING_KEYS.includes(field.key))) continue;
-      if (field.kind === 'nested') { const nested = draft.nested[field.key]; if (nested) parts.push(`${field.key}=${emitNested(nested)}`); continue; }
+      // An option left off is left out: camlib's own default (a part order is never None).
+      if (field.kind === 'nested') { const nested = draft.nested[field.key]; if (nested?.cls) parts.push(`${field.key}=${emitNested(nested)}`); continue; }
       const value = (draft.values[field.key] ?? '').trim();
       if (value) parts.push(`${field.key}=${value}`);
     }
