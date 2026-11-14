@@ -27,7 +27,7 @@ OPERATIONS = ("Facing", "Pocket", "RestPocket", "AdaptivePocket", "Roughing", "R
               "Flat", "Scallop", "Pencil", "Spiral", "Radial", "Project", "Morph")
 OPTIONS = ("HelicalEntry", "StockEdgeEntry", "RampEntry", "RasterClearing", "OffsetClearing", "AdaptiveClearing", "Tabs", "FineBore",
            "TraceSideOffset", "SmallHoles", "MicroJoints", "CommonLine", "SpreadHeat", "AvoidCutParts", "CropCut",
-           "LeadPlacement", "CornerLoops", "CornerSlowdown")
+           "LeadPlacement", "CornerLoops", "CornerSlowdown", "ChainCutting")
 # camlib's plasma and laser operations (a sheet setup's), which the forms write too.
 THERMAL = ("ThermalCut", "ThermalMark")
 # camlib's turning operations (camlib.turning: a lathe setup's), which the forms write too.

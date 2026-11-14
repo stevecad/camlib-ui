@@ -129,6 +129,7 @@ export const NESTED: Record<string, NestedChoice> = {
   lead_placement: { classes: ['LeadPlacement'], label: () => 'By these rules', none: 'Where each loop starts' },
   corner_loops: { classes: ['CornerLoops'], label: () => 'Loop into the scrap', none: 'Off' },
   corner_slowdown: { classes: ['CornerSlowdown'], label: () => 'Slow down', none: 'Off' },
+  chain: { classes: ['ChainCutting'], label: () => 'Join neighbouring outlines', none: 'Pierce every part' },
 };
 
 /**
@@ -309,6 +310,8 @@ const THERMAL_VIEW: Record<string, FieldView> = {
   min_angle_deg: v('Corners turning at least', 'options', DEG, 'A square corner turns 90°.'), max_angle_deg: v('And at most', 'options', DEG),
   corner_slowdown: v('Feed round corners', 'passes', undefined, 'A slower feed either side of each corner, so the arc catches up with the torch. Corners with a loop need none.'),
   distance_mm: v('Before and after the corner', 'options', MM),
+  chain: v('Chain cutting', 'passes', undefined, 'The torch stays on from one part’s outline to the next through a straight cut in the scrap, so a row of parts takes one pierce. A link is cut only where it is proven clear of every part; holes are always pierced.'),
+  max_link_mm: v('Longest link', 'options', MM, 'Between the end of one part’s lead-out and the start of the next part’s lead-in.'),
   min_distance_mm: v('Next part at least', 'passes', MM, 'From where the last part started, so two parts cut one after the other aren’t neighbours.'),
   clearance_mm: v('Clearance', 'options', MM, 'From the beam’s centre: include the torch body’s radius.'),
   compensation: v('Kerf compensation', 'options', undefined, 'Wear: posted with G41/G42, so the kerf is trimmed at the controller.', [['computer', 'In the program'], ['wear', 'Wear (G41/G42)']]),
@@ -325,7 +328,7 @@ const THERMAL_VIEW: Record<string, FieldView> = {
   edge_clearance_mm: v('Clearance to edges', 'options', MM, 'Material kept between a mark and its part’s edges.'),
   allow_off_part: v('Allow marks off the parts', 'options', undefined, 'Skips the proof that every mark is inside one part (marks on the scrap); the result says so.'),
 };
-const THERMAL_OPTIONS = new Set(['SmallHoles', 'MicroJoints', 'CommonLine', 'SpreadHeat', 'AvoidCutParts', 'CropCut', 'LeadPlacement', 'CornerLoops', 'CornerSlowdown']);
+const THERMAL_OPTIONS = new Set(['SmallHoles', 'MicroJoints', 'CommonLine', 'SpreadHeat', 'AvoidCutParts', 'CropCut', 'LeadPlacement', 'CornerLoops', 'CornerSlowdown', 'ChainCutting']);
 
 /** How a turning operation shows fields whose names milling uses for something else. */
 const TURNING_VIEW: Record<string, FieldView> = {

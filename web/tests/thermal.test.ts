@@ -78,6 +78,13 @@ test('the sheet program’s cut read, edited and written back', { skip: !input &
   assert.match(cornered, /from camlib import [^)]*CornerLoops/);
   if (out) writeFileSync(join(out, 'cornered.py'), cornered);
 
+  // Chain cutting: one pierce for neighbouring outlines, the longest link as typed.
+  const chain = { ...emptyNested('ChainCutting'), values: { max_link_mm: '60' } };
+  const chained = writeOp(code, model, 'sheet', { ...draft!, nested: { ...draft!.nested, chain } }, cut);
+  assert.ok(chained.replace(/\s+/g, ' ').includes('chain=ChainCutting(max_link_mm=60)'), chained);
+  assert.match(chained, /from camlib import [^)]*ChainCutting/);
+  if (out) writeFileSync(join(out, 'chained.py'), chained);
+
   // A mark before the cut, on the sheet's margin (off the parts: said so). Lines that aren't points are refused by OK.
   const mark = newOp('ThermalMark', 'mark');
   assert.deepEqual(missingOf(mark), ['Head', 'Parts', 'Lines', 'Feed', 'Mark height', 'Power', 'Mark width']);

@@ -147,7 +147,7 @@ def test_the_shops_table_and_recipe_map_to_camlibs_torch():
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node isn't installed")
 def test_the_cutting_forms_read_write_and_build(client, tmp_path):
     """web/tests/thermal.test.ts on the sheet example: the cut reads into its form through its `**plan` and the shop's
-    recipe; with micro-joints added, with a crop cut added, with corner loops, a corner slow-down and leads at corners added, and with a mark added before it, camlib builds and releases what the forms wrote."""
+    recipe; with micro-joints added, with a crop cut added, with corner loops, a corner slow-down and leads at corners added, with chain cutting added, and with a mark added before it, camlib builds and releases what the forms wrote."""
     root = Path(__file__).resolve().parent.parent
     code = (root / "camlib_ui" / "examples" / "sheet" / "program.py").read_text()
     (tmp_path / "input.json").write_text(json.dumps({"code": code, "outline": forms.outline(code), "fields": forms.operation_fields()}))
@@ -157,7 +157,7 @@ def test_the_cutting_forms_read_write_and_build(client, tmp_path):
                          env={**os.environ, "CAMLIB_UI_THERMAL": str(tmp_path / "input.json"), "CAMLIB_UI_FORMS_OUT": str(out)})
     assert run.returncode == 0, run.stdout[-4000:] + run.stderr[-4000:]
     assert "✔ the sheet program’s cut read, edited and written back" in run.stdout
-    for name in ("joints", "cropped", "cornered", "marked"):
+    for name in ("joints", "cropped", "cornered", "chained", "marked"):
         text = (out / f"{name}.py").read_text()
         if name == "marked":
             # How this machine marks is its own (QtPlasmaC: two entries of its material file); the program states it.
@@ -178,6 +178,11 @@ def test_the_cutting_forms_read_write_and_build(client, tmp_path):
             # nothing turns it); every other corner has a loop, which leaves none to slow down for.
             report = operations[0]["report"]
             assert (report["corner_loops"], report["corner_slowdowns"], report["leads_moved"]) == (18, 0, 6)
+        elif name == "chained":
+            # Fewer pierces than loops: outlines reached through a link need none.
+            report = operations[0]["report"]
+            assert report["chain_links"] > 0
+            assert report["pierces"] == report["loops"] - report["chain_links"]
         else:
             assert [op["id"] for op in operations] == ["mark", "cut"]
 
