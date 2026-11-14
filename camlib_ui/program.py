@@ -1169,12 +1169,22 @@ def _travel(model, key, axes, carrier=None):
     return [low, high]
 
 
-def _decimals(resolution):
+def _decimals(controller):
+    """The decimals a controller's programs are written with, from its least input increment in its own unit:
+    linear_resolution_mm for a control that runs in millimetres, linear_resolution_in for one that runs in inches (a
+    control set to inches reads 0.0001 in, not 0.001 mm). None when the shop doesn't give it (the program then does)."""
+    inch = controller.get("output_units") == "inch"
+    field = "linear_resolution_in" if inch else "linear_resolution_mm"
+    other = "linear_resolution_mm" if inch else "linear_resolution_in"
+    resolution = controller.get(field)
     if resolution is None:
+        if controller.get(other) is not None:
+            raise ShopMappingError(f"The controller's output_units is {'inch' if inch else 'mm'}: give its resolution as "
+                                   f"{field} ({'0.0001' if inch else '0.001'} for most controls), not {other}.")
         return None
     exponent = -math.log10(float(resolution))
     if abs(exponent - round(exponent)) > 1e-9:
-        raise ShopMappingError(f"linear_resolution_mm {resolution} isn't a power of ten.")
+        raise ShopMappingError(f"{field} {resolution} isn't a power of ten.")
     return int(round(exponent))
 
 
@@ -1268,7 +1278,7 @@ def _lathe_machine(item, setup, post, *, tooling, work_to_machine, fixtures, low
     stations = len((m.get("tool_change") or {}).get("stations") or [])
     derived = dict(output_units=c.get("output_units"), max_spindle_rpm=float(spindles[0]["max_rpm"]),
                    max_feed_mm_min=min(rates), rapid_mm_min=min(rates), tool_changes=stations > 0,
-                   decimals=_decimals(c.get("linear_resolution_mm")))
+                   decimals=_decimals(c))
     if work_to_machine is not None:
         if isinstance(work_to_machine, (list, tuple)):
             work_to_machine = WorkFrame(tuple(work_to_machine))
@@ -1315,7 +1325,7 @@ def machine(item, setup, *, tooling=None, work_to_machine=_REQUIRED, fixtures=()
     the setup's scene on it for camlib's checks.
 
     From the shop: the name, the tool table (T numbers and H/D registers from `tooling`, a ToolSetup, with each tool's
-    gauge length), output units, decimals (the controller's linear_resolution_mm), the spindle's max rpm, the axes'
+    gauge length), output units, decimals (the controller's linear_resolution_mm, or linear_resolution_in for one that runs in inches), the spindle's max rpm, the axes'
     velocity limits (max feed, per-axis feeds and rapid rate, after the machine's joint_overrides), whether tools change,
     the axes' travel (after joint_overrides), and the post (the controller's dialect; a declared ISO controller names it:
     post="haas_ngc" or "fanuc_0i_mb").
@@ -1420,7 +1430,7 @@ def machine(item, setup, *, tooling=None, work_to_machine=_REQUIRED, fixtures=()
     derived = dict(output_units=c.get("output_units"), max_spindle_rpm=spindle_limit,
                    max_feed_mm_min=min(velocities), max_axis_feed_mm_min=velocities, rapid_mm_min=min(velocities),
                    tool_changes=changer not in (None, "none"))
-    decimals = _decimals(c.get("linear_resolution_mm"))
+    decimals = _decimals(c)
     if decimals is not None:
         derived["decimals"] = decimals
     if premises.get("tool_change_position_mode") == "z_home":

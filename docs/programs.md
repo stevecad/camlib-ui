@@ -304,6 +304,10 @@ steel6 = shop.add(CuttingRecipe("steel6", "6 mm mild steel, 45 A", process="plas
 | `CuttingHead.plasma(id, nozzle_diameter=, nozzle_length=, body_diameter=, body_length=)`, `CuttingHead.laser(..., max_power_w=)` | The head as camlib checks it against the work: its nozzle and body. A laser's full power. |
 | `CuttingRecipe(key, name, process=, kerf=, feed=, cut_height=, pierce_seconds=, pierce_radius=, lead_in=, lead_out=, pierce_height=, clearance=, power_w=)` | A line of the cut chart: the kerf, the feed and cut height, the pierce's time and splash radius, the leads' straight lengths; the pierce and travel heights when the program moves Z itself; a laser's power. |
 
+A control that runs in inches is declared so in the shop: `Controller(..., output_units="inch",
+linear_resolution_in=0.0001)`. Programs are then posted in inches at that resolution (`G20`; the program, the shop's
+travel and the cut chart stay in millimetres). A resolution in the other unit than the control's is refused.
+
 Controllers and their posts (all from `--camlib-posts`): `linuxcnc_qtplasmac_v1` (QtPlasmaC), `centroid_plasma_v1`
 (Centroid CNC12 plasma), `wincnc_plasma_v1` (WinCNC), `grbl_laser_v1` (GRBL in laser mode; `machine(...,
 beam_s_max=<$30>)`). Each post says what its controller does itself: QtPlasmaC owns Z, the pierce height and the pierce

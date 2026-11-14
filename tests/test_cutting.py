@@ -13,7 +13,7 @@ import pytest
 
 from camlib_ui import forms, stream
 
-from conftest import build, needs_posts, variant
+from conftest import build, edit, needs_posts, variant
 
 
 def _replaced(old, new):
@@ -227,3 +227,47 @@ def test_dxf_parts_nest_from_a_corner_and_the_remnant_comes_out(client, tmp_path
     # Nested from the lower left the parts cover (40, 40) and (460, 260) is left; from the upper right it is the reverse.
     assert not free(remnant, (40, 40)) and free(remnant, (460, 260))
     assert free(left, (40, 40)) and not free(left, (460, 260))
+
+
+@needs_posts
+def test_a_wincnc_table_that_runs_in_inches(client):
+    """The nest example on a WinCNC control set to inches (a ShopSabre table's setup): the shop states inch output and
+    the control's resolution in inches, WinCNC's own material setup owns the pierce, the heights and height control, and
+    the program is released in inches (G20, four decimals) with its half-turn arcs still arcs or checked lines."""
+    assert client.post("/api/projects", json={"name": "nest_inch", "example": "nest"}).status_code == 200
+    edit(client, "nest_inch", "shop.py", _replaced(
+        'Controller("control", "LinuxCNC QtPlasmaC", dialect="linuxcnc_qtplasmac_v1", processes=("plasma",),\n'
+        '                              linear_resolution_mm=0.001)',
+        'Controller("control", "WinCNC", dialect="wincnc_plasma_v1", processes=("plasma",),\n'
+        '                              output_units="inch", linear_resolution_in=0.0001)'))
+    program = [
+        ("plan = dict(overcut_mm=-0.5, height_control=True, small_holes=SmallHoles(feed_percent=60),",
+         "plan = dict(overcut_mm=-0.5, small_holes=SmallHoles(feed_percent=60, height_control_off=False),"),
+        ("(torch,), ops, (0, 0, 40),", "(torch,), ops, (0, 0, THICKNESS + 1.5),"),
+        ('arcs=True, helices=False, planes=("xy",), max_sweep_rad=math.tau, max_tool_number=1, max_length_register=1,\n'
+         '            blend_mm=0.005),',
+         "arcs=True, helices=False, max_tool_number=1, max_length_register=1),"),
+    ]
+
+    def change(text):
+        for old, new in program:
+            assert old in text, old
+            text = text.replace(old, new)
+        return text
+
+    edit(client, "nest_inch", "program.py", change)
+    built = build(client, "nest_inch")
+    assert built["status"] == "done" and built["ok"], built.get("program_error")
+    machine = built["metadata"]["setups"][0]["machines"][0]
+    assert built["released"] == 1 and machine["post"] == "wincnc_plasma", json.dumps(machine)[:2000]
+    lines = client.get(built["files"]["gcode-1.nc"]).text.splitlines()
+    assert lines[:2] == ["G90", "G20"] and "G22" not in lines
+    xs = [float(word[1:]) for line in lines if line[:2] in ("G0", "G1", "G2", "G3") for word in line.split() if word[0] == "X"]
+    # The sheet is 500 mm wide: 19.7 in. Every word is inches, at four decimals.
+    assert xs and 0 < min(xs) and max(xs) < 19.7
+    assert all(len(word.partition(".")[2]) <= 4 for line in lines if line[:1] == "G" for word in line.split() if word[0] in "XYIJ")
+    assert sum(line[:2] in ("G2", "G3") for line in lines) > 20
+    # A resolution in the wrong unit for the control is refused, naming the field.
+    edit(client, "nest_inch", "shop.py", _replaced("linear_resolution_in=0.0001", "linear_resolution_mm=0.001"))
+    refused = build(client, "nest_inch", "preview")
+    assert refused["ok"] is False and "linear_resolution_in" in refused["program_error"]
